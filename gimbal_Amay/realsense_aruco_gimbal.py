@@ -16,7 +16,7 @@ def main():
     config = rs.config()
     
     # Standard configuration supported by most RealSense cameras over USB 3.0/2.0
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 60)
+    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 90)
 
     # Start RealSense camera
     profile = pipeline.start(config)
