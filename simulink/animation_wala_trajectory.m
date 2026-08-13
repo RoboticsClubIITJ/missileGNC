@@ -1,17 +1,49 @@
 % ==========================================
 % Data Extraction & Vectorization
 % ==========================================
-% Ensure data arrays are forced into column vectors
+% Position data
 xM = out.Xm.Data(:);
 yM = out.Ym.Data(:);
 
 xT = out.Xt.Data(:);
 yT = out.Yt.Data(:);
 
+% Thrust data (Magnitude and Angle relative to velocity)
+% Adjust field names if they differ in your workspace/out struct
+T_mag = out.Thrust.Data(:); 
+T_ang = out.ThrustAngle.Data(:); % Angle relative to velocity direction
+
+% Convert thrust angle to radians if provided in degrees
+if max(abs(T_ang)) > 2*pi
+    T_ang_rad = deg2rad(T_ang);
+else
+    T_ang_rad = T_ang;
+end
+
+% Compute missile velocity vector direction (heading angle gamma)
+vx = [diff(xM); 0]; % Pad last element to preserve array length
+vy = [diff(yM); 0];
+heading_angle = atan2(vy, vx);
+
+% Total Thrust Direction = Missile Heading + Thrust Deflection Angle
+thrust_total_angle = heading_angle + T_ang_rad;
+
+% Compute 2D Thrust Vector Components
+Fx = T_mag .* cos(thrust_total_angle);
+Fy = T_mag .* sin(thrust_total_angle);
+
+% Scale factor for thrust vector visualization (adjust if arrow is too big/small)
+maxPosRange = max(max(xM)-min(xM), max(yM)-min(yM));
+maxThrust = max(T_mag);
+if maxThrust > 0
+    scaleFactor = 0.08 * maxPosRange / maxThrust;
+else
+    scaleFactor = 1;
+end
+
 % ==========================================
 % Collision Verification Check
 % ==========================================
-% Calculate relative distance between missile and target over time
 dist = sqrt((xM - xT).^2 + (yM - yT).^2);
 [minDist, minIdx] = min(dist);
 
@@ -26,10 +58,9 @@ fprintf('=============================\n\n');
 % ==========================================
 % Figure & Axes Initialization
 % ==========================================
-% Close old windows to clear stuck graphics handles
 close all;
 
-fig = figure('Name', 'Missile-Target Engagement', 'Color', 'w', 'NumberTitle', 'off');
+fig = figure('Name', 'Missile-Target Engagement with Thrust Vector', 'Color', 'w', 'NumberTitle', 'off');
 ax = axes('Parent', fig);
 
 % Pre-calculate spatial boundaries for fixed axes limits
@@ -49,7 +80,7 @@ axis(ax, 'equal');
 
 xlabel(ax, 'X Position (m)');
 ylabel(ax, 'Y Position (m)');
-title(ax, 'Missile vs Target Trajectory Animation');
+title(ax, 'Missile vs Target Trajectory & Thrust Vector Animation');
 
 % Plot trailing path objects
 hMissileLine = plot(ax, NaN, NaN, 'r-', 'LineWidth', 2, 'DisplayName', 'Missile Path');
@@ -59,16 +90,19 @@ hTargetLine  = plot(ax, NaN, NaN, 'b--', 'LineWidth', 2, 'DisplayName', 'Target 
 hMissileHead = plot(ax, xM(1), yM(1), 'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 8, 'DisplayName', 'Missile');
 hTargetHead  = plot(ax, xT(1), yT(1), 'bs', 'MarkerFaceColor', 'b', 'MarkerSize', 8, 'DisplayName', 'Target');
 
-legend(ax, [hMissileLine, hTargetLine, hMissileHead, hTargetHead], 'Location', 'northeast');
+% Plot dynamic Thrust Vector (Quiver object attached to missile position)
+hThrustVec = quiver(ax, xM(1), yM(1), Fx(1)*scaleFactor, Fy(1)*scaleFactor, 0, ...
+    'Color', [0.85 0.33 0.1], 'LineWidth', 2, 'MaxHeadSize', 2, 'DisplayName', 'Thrust Vector');
+
+legend(ax, [hMissileLine, hTargetLine, hMissileHead, hTargetHead, hThrustVec], 'Location', 'northeast');
 
 % ==========================================
 % Explicit Animation Loop
 % ==========================================
-numSamples = min([length(xM), length(yM), length(xT), length(yT)]);
+numSamples = min([length(xM), length(yM), length(xT), length(yT), length(Fx), length(Fy)]);
 
-% Adjust step size if sample count is large (1ms dt can result in tens of thousands of frames)
 if numSamples > 2000
-    stepSize = ceil(numSamples / 500); % Targets ~500 rendered frames
+    stepSize = ceil(numSamples / 500); 
 else
     stepSize = 5;
 end
@@ -82,7 +116,11 @@ for k = 1:stepSize:numSamples
     set(hMissileHead, 'XData', xM(k), 'YData', yM(k));
     set(hTargetHead,  'XData', xT(k), 'YData', yT(k));
     
-    % Force render step (pause forces UI thread execution)
+    % Update Thrust Vector position & components
+    set(hThrustVec, 'XData', xM(k), 'YData', yM(k), ...
+                    'UData', Fx(k)*scaleFactor, 'VData', Fy(k)*scaleFactor);
+    
+    % Force render step
     pause(0.01);
 end
 
@@ -91,6 +129,8 @@ set(hMissileLine, 'XData', xM(1:numSamples), 'YData', yM(1:numSamples));
 set(hTargetLine,  'XData', xT(1:numSamples), 'YData', yT(1:numSamples));
 set(hMissileHead, 'XData', xM(numSamples), 'YData', yM(numSamples));
 set(hTargetHead,  'XData', xT(numSamples), 'YData', yT(numSamples));
+set(hThrustVec,   'XData', xM(numSamples), 'YData', yM(numSamples), ...
+                  'UData', Fx(numSamples)*scaleFactor, 'VData', Fy(numSamples)*scaleFactor);
 
 % Mark point of closest approach
 plot(ax, xM(minIdx), yM(minIdx), 'kp', 'MarkerSize', 14, 'MarkerFaceColor', 'y', 'DisplayName', 'Impact Point');
