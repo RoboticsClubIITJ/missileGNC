@@ -182,6 +182,7 @@ fprintf('================================================================\n');
 mI  = metrics(Ar);           % per-run metrics on each run's own time base
 mL  = metrics(Br);
 
+
 % {label, ideal value, limited value, decimals}
 rows = { ...
   "Miss distance                (m)",     mI.miss,    mL.miss,    4; ...
