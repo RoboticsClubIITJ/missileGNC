@@ -4,12 +4,10 @@
 % Position data
 xM = out.Xm.Data(:);
 yM = out.Ym.Data(:);
-
 xT = out.Xt.Data(:);
 yT = out.Yt.Data(:);
 
 % Thrust data (Magnitude and Angle relative to velocity)
-% Adjust field names if they differ in your workspace/out struct
 T_mag = out.Thrust.Data(:); 
 T_ang = out.ThrustAngle.Data(:); % Angle relative to velocity direction
 
@@ -28,9 +26,10 @@ heading_angle = atan2(vy, vx);
 % Total Thrust Direction = Missile Heading + Thrust Deflection Angle
 thrust_total_angle = heading_angle + T_ang_rad;
 
-% Compute 2D Thrust Vector Components
-Fx = T_mag .* cos(thrust_total_angle);
-Fy = T_mag .* sin(thrust_total_angle);
+% Compute 2D Thrust Force Components
+% NOTE: We invert (-Fx, -Fy) so the vector points backward like exhaust fire!
+Fx = -T_mag .* cos(thrust_total_angle);
+Fy = -T_mag .* sin(thrust_total_angle);
 
 % Scale factor for thrust vector visualization (adjust if arrow is too big/small)
 maxPosRange = max(max(xM)-min(xM), max(yM)-min(yM));
@@ -59,8 +58,7 @@ fprintf('=============================\n\n');
 % Figure & Axes Initialization
 % ==========================================
 close all;
-
-fig = figure('Name', 'Missile-Target Engagement with Thrust Vector', 'Color', 'w', 'NumberTitle', 'off');
+fig = figure('Name', 'Missile-Target Engagement with Exhaust Plume', 'Color', 'w', 'NumberTitle', 'off');
 ax = axes('Parent', fig);
 
 % Pre-calculate spatial boundaries for fixed axes limits
@@ -68,7 +66,6 @@ allX = [xM; xT];
 allY = [yM; yT];
 xMin = min(allX); xMax = max(allX);
 yMin = min(allY); yMax = max(allY);
-
 dx = max(xMax - xMin, 1);
 dy = max(yMax - yMin, 1);
 margin = 0.10 * max(dx, dy);
@@ -80,7 +77,7 @@ axis(ax, 'equal');
 
 xlabel(ax, 'X Position (m)');
 ylabel(ax, 'Y Position (m)');
-title(ax, 'Missile vs Target Trajectory & Thrust Vector Animation');
+title(ax, 'Missile vs Target Trajectory & Exhaust Plume Animation');
 
 % Plot trailing path objects
 hMissileLine = plot(ax, NaN, NaN, 'r-', 'LineWidth', 2, 'DisplayName', 'Missile Path');
@@ -90,9 +87,9 @@ hTargetLine  = plot(ax, NaN, NaN, 'b--', 'LineWidth', 2, 'DisplayName', 'Target 
 hMissileHead = plot(ax, xM(1), yM(1), 'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 8, 'DisplayName', 'Missile');
 hTargetHead  = plot(ax, xT(1), yT(1), 'bs', 'MarkerFaceColor', 'b', 'MarkerSize', 8, 'DisplayName', 'Target');
 
-% Plot dynamic Thrust Vector (Quiver object attached to missile position)
+% Plot dynamic Exhaust Vector pointing BACKWARD out of the missile tail
 hThrustVec = quiver(ax, xM(1), yM(1), Fx(1)*scaleFactor, Fy(1)*scaleFactor, 0, ...
-    'Color', [0.85 0.33 0.1], 'LineWidth', 2, 'MaxHeadSize', 2, 'DisplayName', 'Thrust Vector');
+    'Color', [1 0.3 0], 'LineWidth', 2.5, 'MaxHeadSize', 2, 'DisplayName', 'Thrust Exhaust');
 
 legend(ax, [hMissileLine, hTargetLine, hMissileHead, hTargetHead, hThrustVec], 'Location', 'northeast');
 
@@ -100,7 +97,6 @@ legend(ax, [hMissileLine, hTargetLine, hMissileHead, hTargetHead, hThrustVec], '
 % Explicit Animation Loop
 % ==========================================
 numSamples = min([length(xM), length(yM), length(xT), length(yT), length(Fx), length(Fy)]);
-
 if numSamples > 2000
     stepSize = ceil(numSamples / 500); 
 else
@@ -116,7 +112,7 @@ for k = 1:stepSize:numSamples
     set(hMissileHead, 'XData', xM(k), 'YData', yM(k));
     set(hTargetHead,  'XData', xT(k), 'YData', yT(k));
     
-    % Update Thrust Vector position & components
+    % Update Exhaust Vector position & components
     set(hThrustVec, 'XData', xM(k), 'YData', yM(k), ...
                     'UData', Fx(k)*scaleFactor, 'VData', Fy(k)*scaleFactor);
     
@@ -139,7 +135,6 @@ plot(ax, xM(minIdx), yM(minIdx), 'kp', 'MarkerSize', 14, 'MarkerFaceColor', 'y',
 % Print Reference Statements (Preserved)
 % ==========================================
 fprintf('\n--- SIMULATION DATA ---\n');
-
 fprintf('Samples Xm: %d\n', length(out.Xm.Data));
 fprintf('Samples Ym: %d\n', length(out.Ym.Data));
 fprintf('Samples Xt: %d\n', length(out.Xt.Data));
