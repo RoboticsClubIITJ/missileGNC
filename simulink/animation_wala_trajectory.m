@@ -9,7 +9,7 @@ yT = out.Yt.Data(:);
 
 % Thrust data (Magnitude and Angle relative to velocity)
 T_mag = out.Thrust.Data(:); 
-T_ang = out.ThrustAngle.Data(:); % Angle relative to velocity direction
+T_ang = out.ThrustAngle.Data(:); 
 
 % Convert thrust angle to radians if provided in degrees
 if max(abs(T_ang)) > 2*pi
@@ -26,12 +26,11 @@ heading_angle = atan2(vy, vx);
 % Total Thrust Direction = Missile Heading + Thrust Deflection Angle
 thrust_total_angle = heading_angle + T_ang_rad;
 
-% Compute 2D Thrust Force Components
-% NOTE: We invert (-Fx, -Fy) so the vector points backward like exhaust fire!
+% Compute 2D Thrust Force Components (Negated for exhaust plume direction)
 Fx = -T_mag .* cos(thrust_total_angle);
 Fy = -T_mag .* sin(thrust_total_angle);
 
-% Scale factor for thrust vector visualization (adjust if arrow is too big/small)
+% Scale factor for thrust vector visualization
 maxPosRange = max(max(xM)-min(xM), max(yM)-min(yM));
 maxThrust = max(T_mag);
 if maxThrust > 0
@@ -58,7 +57,7 @@ fprintf('=============================\n\n');
 % Figure & Axes Initialization
 % ==========================================
 close all;
-fig = figure('Name', 'Missile-Target Engagement with Exhaust Plume', 'Color', 'w', 'NumberTitle', 'off');
+fig = figure('Name', 'Missile-Target Engagement with Rocket Icon', 'Color', 'w', 'NumberTitle', 'off');
 ax = axes('Parent', fig);
 
 % Pre-calculate spatial boundaries for fixed axes limits
@@ -77,21 +76,42 @@ axis(ax, 'equal');
 
 xlabel(ax, 'X Position (m)');
 ylabel(ax, 'Y Position (m)');
-title(ax, 'Missile vs Target Trajectory & Exhaust Plume Animation');
+title(ax, 'Missile vs Target Trajectory & Rocket Icon Animation');
 
 % Plot trailing path objects
 hMissileLine = plot(ax, NaN, NaN, 'r-', 'LineWidth', 2, 'DisplayName', 'Missile Path');
 hTargetLine  = plot(ax, NaN, NaN, 'b--', 'LineWidth', 2, 'DisplayName', 'Target Path');
 
-% Plot moving heads
-hMissileHead = plot(ax, xM(1), yM(1), 'ro', 'MarkerFaceColor', 'r', 'MarkerSize', 8, 'DisplayName', 'Missile');
+% Plot Target Head
 hTargetHead  = plot(ax, xT(1), yT(1), 'bs', 'MarkerFaceColor', 'b', 'MarkerSize', 8, 'DisplayName', 'Target');
 
-% Plot dynamic Exhaust Vector pointing BACKWARD out of the missile tail
+% Plot dynamic Exhaust Vector
 hThrustVec = quiver(ax, xM(1), yM(1), Fx(1)*scaleFactor, Fy(1)*scaleFactor, 0, ...
     'Color', [1 0.3 0], 'LineWidth', 2.5, 'MaxHeadSize', 2, 'DisplayName', 'Thrust Exhaust');
 
-legend(ax, [hMissileLine, hTargetLine, hMissileHead, hTargetHead, hThrustVec], 'Location', 'northeast');
+% ==========================================
+% Rocket Icon Setup (Transform Object)
+% ==========================================
+% Scale factor for rocket graphic size
+rocketSize = 0.03 * maxPosRange; 
+
+% Create a local rocket geometry (centered at origin, pointing along +X)
+rx = [0.5, 0.2, -0.4, -0.5, -0.4, 0.2, 0.5]; 
+ry = [0,   0.1,  0.1,   0.25, -0.25, -0.1, 0] * 0.5;
+
+% Create transform handle for the rocket object
+hRocketGroup = hgtransform('Parent', ax);
+hRocketBody = fill(rx * rocketSize, ry * rocketSize, [0.8 0.1 0.1], ...
+    'EdgeColor', 'k', 'Parent', hRocketGroup, 'DisplayName', 'Missile Rocket');
+
+legend(ax, [hMissileLine, hTargetLine, hTargetHead, hRocketBody, hThrustVec], 'Location', 'northeast');
+
+% Function to update rocket transform (translation + rotation)
+updateRocketTransform = @(x, y, angle) set(hRocketGroup, 'Matrix', ...
+    makehgtform('translate', [x, y, 0]) * makehgtform('zrotate', angle));
+
+% Set initial position & orientation of the rocket
+updateRocketTransform(xM(1), yM(1), heading_angle(1));
 
 % ==========================================
 % Explicit Animation Loop
@@ -108,9 +128,11 @@ for k = 1:stepSize:numSamples
     set(hMissileLine, 'XData', xM(1:k), 'YData', yM(1:k));
     set(hTargetLine,  'XData', xT(1:k), 'YData', yT(1:k));
     
-    % Move marker heads
-    set(hMissileHead, 'XData', xM(k), 'YData', yM(k));
+    % Move target marker head
     set(hTargetHead,  'XData', xT(k), 'YData', yT(k));
+    
+    % Move & rotate rocket body
+    updateRocketTransform(xM(k), yM(k), heading_angle(k));
     
     % Update Exhaust Vector position & components
     set(hThrustVec, 'XData', xM(k), 'YData', yM(k), ...
@@ -123,8 +145,8 @@ end
 % Render final frame explicitly
 set(hMissileLine, 'XData', xM(1:numSamples), 'YData', yM(1:numSamples));
 set(hTargetLine,  'XData', xT(1:numSamples), 'YData', yT(1:numSamples));
-set(hMissileHead, 'XData', xM(numSamples), 'YData', yM(numSamples));
 set(hTargetHead,  'XData', xT(numSamples), 'YData', yT(numSamples));
+updateRocketTransform(xM(numSamples), yM(numSamples), heading_angle(numSamples));
 set(hThrustVec,   'XData', xM(numSamples), 'YData', yM(numSamples), ...
                   'UData', Fx(numSamples)*scaleFactor, 'VData', Fy(numSamples)*scaleFactor);
 
