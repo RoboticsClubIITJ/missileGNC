@@ -11,12 +11,17 @@ def main():
     # Set the physical size of your printed ArUco marker in meters
     MARKER_SIZE = 0.05 
 
+    if not hasattr(cv2, "aruco"):
+        raise RuntimeError(
+            "OpenCV was built without ArUco support. Install an opencv-contrib build."
+        )
+
     # Initialize RealSense pipeline
     pipeline = rs.pipeline()
     config = rs.config()
     
     # Standard configuration supported by most RealSense cameras over USB 3.0/2.0
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 90)
+    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 
     # Start RealSense camera
     profile = pipeline.start(config)
@@ -33,7 +38,7 @@ def main():
     dist_coeffs = np.array(intrinsics.coeffs, dtype=np.float32)
 
     # Setup ArUco Dictionary and Parameters with optimizations
-    if hasattr(cv2.aruco, 'getPredefinedDictionary'):
+    if hasattr(cv2.aruco, 'ArucoDetector'):
         dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
         parameters = cv2.aruco.DetectorParameters()
         parameters.adaptiveThreshWinSizeMin = 5
@@ -82,9 +87,12 @@ def main():
             if ids is not None and len(ids) > 0:
                 for i, corner in enumerate(corners):
                     # IPPE_SQUARE is the fastest PnP solver for 4 coplanar points
-                    _, rvec, tvec = cv2.solvePnP(
-                        marker_points, corner, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_IPPE_SQUARE
+                    success, rvec, tvec = cv2.solvePnP(
+                        marker_points, corner[0], camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_IPPE_SQUARE
                     )
+
+                    if not success:
+                        continue
                     
                     t = tvec.flatten()
                     x, y, z = t[0], t[1], t[2]
@@ -107,6 +115,13 @@ def main():
             if ids is not None and len(ids) > 0:
                 cv2.aruco.drawDetectedMarkers(display_frame, corners, ids)
                 for i, corner in enumerate(corners):
+                    success, rvec, tvec = cv2.solvePnP(
+                        marker_points, corner[0], camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_IPPE_SQUARE
+                    )
+
+                    if not success:
+                        continue
+
                     cv2.drawFrameAxes(display_frame, camera_matrix, dist_coeffs, rvec, tvec, MARKER_SIZE / 2)
                     
                     print(f"Marker ID: {ids.flatten()[i]}")
