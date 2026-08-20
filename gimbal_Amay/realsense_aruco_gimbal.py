@@ -1,9 +1,7 @@
 import cv2
 import numpy as np
-import pyrealsense2 as rs
 import math
 import time
-#latest
 
 # Force OpenCV to utilize all 4 Raspberry Pi CPU cores for operations
 cv2.setNumThreads(4)
@@ -17,26 +15,34 @@ def main():
             "OpenCV was built without ArUco support. Install an opencv-contrib build."
         )
 
-    # Initialize RealSense pipeline
-    pipeline = rs.pipeline()
-    config = rs.config()
+    # =======================================================
+    # RASPBERRY PI CAMERA V1.3 CONFIGURATION
+    # =======================================================
+    # Initialize standard webcam capture (0 is typically the CSI Pi Camera)
+    cap = cv2.VideoCapture(0)
     
-    # Standard configuration supported by most RealSense cameras over USB 3.0/2.0
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+    # Force the camera to output a standard 640x480 resolution
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
-    # Start RealSense camera
-    profile = pipeline.start(config)
+    if not cap.isOpened():
+        raise RuntimeError("Error: Could not access the Raspberry Pi Camera.")
 
-    # Get camera intrinsics directly from the RealSense hardware
-    color_stream = profile.get_stream(rs.stream.color)
-    intrinsics = color_stream.as_video_stream_profile().get_intrinsics()
+    # HARDCODED INTRINSICS (MUST BE CALIBRATED FOR TRUE ACCURACY)
+    # Placeholder for Pi Cam v1.3 (OV5647) at 640x480
+    focal_length = 500.0
+    center_x = 320.0
+    center_y = 240.0
     
     camera_matrix = np.array([
-        [intrinsics.fx, 0, intrinsics.ppx],
-        [0, intrinsics.fy, intrinsics.ppy],
-        [0, 0, 1]
+        [focal_length, 0.0, center_x],
+        [0.0, focal_length, center_y],
+        [0.0, 0.0, 1.0]
     ], dtype=np.float32)
-    dist_coeffs = np.array(intrinsics.coeffs, dtype=np.float32)
+    
+    # Assuming zero distortion until you run a calibration script
+    dist_coeffs = np.zeros((5, 1), dtype=np.float32)
+    # =======================================================
 
     # Setup ArUco Dictionary and Parameters with optimizations
     if hasattr(cv2.aruco, 'ArucoDetector'):
@@ -64,13 +70,13 @@ def main():
 
     try:
         while True:
-            frames = pipeline.wait_for_frames()
-            color_frame = frames.get_color_frame()
-            if not color_frame:
-                continue
+            # Capture frame-by-frame from the Pi Camera
+            ret, frame = cap.read()
+            if not ret:
+                print("Failed to grab frame. Exiting...")
+                break
 
-            # Standard color frame extraction and grayscale conversion
-            frame = np.asanyarray(color_frame.get_data())
+            # Convert to grayscale for the detector
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             # =======================================================
@@ -139,7 +145,7 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
             # Display the live video feed
-            cv2.imshow("RealSense ArUco Detection", display_frame)
+            cv2.imshow("Raspberry Pi Cam ArUco Detection", display_frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
@@ -147,8 +153,9 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        # Safely release the hardware lock on the Pi camera when closing the script
+        cap.release()
         cv2.destroyAllWindows()
-        pipeline.stop()
 
 if __name__ == "__main__":
     main()
