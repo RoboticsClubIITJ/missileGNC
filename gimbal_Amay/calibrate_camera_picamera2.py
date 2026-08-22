@@ -8,8 +8,8 @@ from picamera2 import Picamera2
 # =======================================================
 SQUARES_X = 7
 SQUARES_Y = 10
-SQUARE_LENGTH_M = 0.03    # <-- measure your PRINTED board's square edge and update this
-MARKER_LENGTH_M = 0.022   # <-- measure your PRINTED board's marker edge and update this
+SQUARE_LENGTH_M = 0.0105   # <-- measure your PRINTED board's square edge and update this
+MARKER_LENGTH_M = 0.007   # <-- measure your PRINTED board's marker edge and update this
 
 WIDTH, HEIGHT = 640, 480
 MIN_CAPTURES = 15  # aim for 15-25 good captures from varied angles/distances
