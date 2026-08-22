@@ -12,6 +12,7 @@ def main():
     # Set the physical size of your printed ArUco marker in meters
     MARKER_SIZE = 0.05
     ADAPTIVE_THRESH_WINDOWS = 1
+    DETECTION_SCALE = 0.75
 
     if not hasattr(cv2, "aruco"):
         raise RuntimeError(
@@ -61,10 +62,17 @@ def main():
     )
     if calibration_file is not None:
         with np.load(calibration_file) as calibration:
-            camera_matrix = calibration["camera_matrix"].astype(np.float32)
-            dist_coeffs = calibration["dist_coeffs"].reshape(-1, 1).astype(np.float32)
+            camera_matrix_key = "camera_matrix" if "camera_matrix" in calibration else "mtx"
+            distortion_key = "dist_coeffs" if "dist_coeffs" in calibration else "dist"
+            camera_matrix = calibration[camera_matrix_key].astype(np.float32)
+            dist_coeffs = calibration[distortion_key].reshape(-1, 1).astype(np.float32)
 
-        if camera_matrix.shape != (3, 3) or dist_coeffs.shape[0] < 4:
+        if (
+            camera_matrix.shape != (3, 3)
+            or dist_coeffs.shape[0] < 4
+            or not np.isfinite(camera_matrix).all()
+            or not np.isfinite(dist_coeffs).all()
+        ):
             raise ValueError(f"Invalid calibration data in {calibration_file}")
 
         print(f"Loaded camera calibration from {calibration_file}")
@@ -77,6 +85,8 @@ def main():
         parameters.adaptiveThreshWinSizeMin = 5
         parameters.adaptiveThreshWinSizeMax = 5 + (ADAPTIVE_THRESH_WINDOWS - 1) * 5
         parameters.adaptiveThreshWinSizeStep = 5
+        if hasattr(cv2.aruco, "CORNER_REFINE_NONE"):
+            parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_NONE
         detector = cv2.aruco.ArucoDetector(dictionary, parameters)
         legacy_api = False
     else:
@@ -85,6 +95,8 @@ def main():
         parameters.adaptiveThreshWinSizeMin = 5
         parameters.adaptiveThreshWinSizeMax = 5 + (ADAPTIVE_THRESH_WINDOWS - 1) * 5
         parameters.adaptiveThreshWinSizeStep = 5
+        if hasattr(cv2.aruco, "CORNER_REFINE_NONE"):
+            parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_NONE
         legacy_api = True
 
     marker_points = np.array([
@@ -106,11 +118,36 @@ def main():
             # STRICT INFERENCE TIMING BLOCK
             # =======================================================
             start_time = time.perf_counter()
+            detection_gray = cv2.resize(
+                gray, None, fx=DETECTION_SCALE, fy=DETECTION_SCALE,
+                interpolation=cv2.INTER_AREA
+            )
 
             if not legacy_api:
-                corners, ids, rejected = detector.detectMarkers(gray)
+                corners, ids, rejected = detector.detectMarkers(detection_gray)
             else:
-                corners, ids, rejected = cv2.aruco.detectMarkers(gray, dictionary, parameters=parameters)
+                corners, ids, rejected = cv2.aruco.detectMarkers(
+                    detection_gray, dictionary, parameters=parameters
+                )
+
+            # Keep pose estimation in the original calibrated camera coordinate system.
+            if corners:
+                corners = [corner / DETECTION_SCALE for corner in corners]
+                refinement_criteria = (
+                    cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
+                    30,
+                    0.001,
+                )
+                corners = [
+                    cv2.cornerSubPix(
+                        gray,
+                        corner.astype(np.float32),
+                        (5, 5),
+                        (-1, -1),
+                        refinement_criteria,
+                    )
+                    for corner in corners
+                ]
 
             marker_array = None  # will hold [x, y, z, pitch, yaw] for the detected marker
             pose_results = []
