@@ -1,139 +1,92 @@
-import os
-import time
-
 import cv2
 import numpy as np
+import time
 from picamera2 import Picamera2
 
+# =======================================================
+# MUST MATCH generate_charuco.py exactly
+# =======================================================
+SQUARES_X = 7
+SQUARES_Y = 10
+SQUARE_LENGTH_M = 0.03    # <-- measure your PRINTED board's square edge and update this
+MARKER_LENGTH_M = 0.022   # <-- measure your PRINTED board's marker edge and update this
 
-CHECKERBOARD = (9, 6)
-SQUARE_SIZE_METERS = 0.024
-REQUIRED_SAMPLES = 20
-IMAGE_SIZE = (640, 480)
-OUTPUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration.npz")
+WIDTH, HEIGHT = 640, 480
+MIN_CAPTURES = 15  # aim for 15-25 good captures from varied angles/distances
 
+dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+board = cv2.aruco.CharucoBoard(
+    (SQUARES_X, SQUARES_Y), SQUARE_LENGTH_M, MARKER_LENGTH_M, dictionary
+)
+detector = cv2.aruco.ArucoDetector(dictionary, cv2.aruco.DetectorParameters())
+charuco_detector = cv2.aruco.CharucoDetector(board)
 
-def main():
-    object_points = np.zeros(
-        (CHECKERBOARD[0] * CHECKERBOARD[1], 3), dtype=np.float32
-    )
-    object_points[:, :2] = np.mgrid[
-        0 : CHECKERBOARD[0], 0 : CHECKERBOARD[1]
-    ].T.reshape(-1, 2)
-    object_points *= SQUARE_SIZE_METERS
+picam2 = Picamera2()
+config = picam2.create_video_configuration(main={"size": (WIDTH, HEIGHT), "format": "RGB888"})
+picam2.configure(config)
+picam2.start()
+time.sleep(2)
 
-    criteria = (
-        cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
-        30,
-        0.001,
-    )
-    captured_object_points = []
-    captured_image_points = []
+all_charuco_corners = []
+all_charuco_ids = []
+captured = 0
 
-    picam2 = Picamera2()
-    config = picam2.create_video_configuration(
-        main={"size": IMAGE_SIZE, "format": "RGB888"}
-    )
-    picam2.configure(config)
-    picam2.start()
-    time.sleep(2)
+print("Move the board around (angle, distance, position in frame).")
+print("Press SPACE to capture a good detection, 'q' when done (need >=", MIN_CAPTURES, ")")
 
-    print(f"Checkerboard: {CHECKERBOARD} inner corners")
-    print(f"Square size: {SQUARE_SIZE_METERS:.4f} m")
-    print("Move the board around the full image area.")
-    print("Press S when corners are visible to capture a sample.")
-    print("Press Q to calibrate and quit.")
+try:
+    while True:
+        frame = picam2.capture_array()
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    try:
-        while len(captured_object_points) < REQUIRED_SAMPLES:
-            frame = picam2.capture_array()
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            found, corners = cv2.findChessboardCorners(
-                gray,
-                CHECKERBOARD,
-                cv2.CALIB_CB_ADAPTIVE_THRESH
-                + cv2.CALIB_CB_NORMALIZE_IMAGE
-                + cv2.CALIB_CB_FAST_CHECK,
-            )
+        charuco_corners, charuco_ids, marker_corners, marker_ids = charuco_detector.detectBoard(gray)
 
-            preview = frame.copy()
-            if found:
-                refined_corners = cv2.cornerSubPix(
-                    gray, corners, (11, 11), (-1, -1), criteria
-                )
-                cv2.drawChessboardCorners(
-                    preview, CHECKERBOARD, refined_corners, found
-                )
+        display = frame.copy()
+        if marker_ids is not None and len(marker_ids) > 0:
+            cv2.aruco.drawDetectedMarkers(display, marker_corners, marker_ids)
+        if charuco_ids is not None and len(charuco_ids) > 0:
+            cv2.aruco.drawDetectedCornersCharuco(display, charuco_corners, charuco_ids)
 
-            cv2.putText(
-                preview,
-                f"Samples: {len(captured_object_points)}/{REQUIRED_SAMPLES}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 0) if found else (0, 0, 255),
-                2,
-            )
-            cv2.imshow("Camera Calibration", preview)
+        cv2.putText(display, f"Captured: {captured}/{MIN_CAPTURES}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.imshow("Calibration Capture", display)
 
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                break
-            if key == ord("s") and found:
-                captured_object_points.append(object_points.copy())
-                captured_image_points.append(refined_corners)
-                print(
-                    f"Captured sample {len(captured_object_points)} "
-                    f"of {REQUIRED_SAMPLES}"
-                )
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord(' '):
+            if charuco_ids is not None and len(charuco_ids) >= 6:
+                all_charuco_corners.append(charuco_corners)
+                all_charuco_ids.append(charuco_ids)
+                captured += 1
+                print(f"Captured {captured} (this frame had {len(charuco_ids)} corners)")
+            else:
+                print("Not enough corners visible, reposition and try again")
+        elif key == ord('q'):
+            break
 
-        if len(captured_object_points) < 10:
-            raise RuntimeError("Capture at least 10 valid samples before calibrating.")
+finally:
+    picam2.stop()
+    cv2.destroyAllWindows()
 
-        image_size = gray.shape[::-1]
-        rms_error, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
-            captured_object_points,
-            captured_image_points,
-            image_size,
-            None,
-            None,
-        )
+if captured < 4:
+    print("Not enough captures to calibrate. Need at least 4, ideally 15+.")
+    exit(1)
 
-        total_error = 0.0
-        for object_points_3d, image_points_2d, rvec, tvec in zip(
-            captured_object_points,
-            captured_image_points,
-            rvecs,
-            tvecs,
-        ):
-            projected_points, _ = cv2.projectPoints(
-                object_points_3d, rvec, tvec, camera_matrix, dist_coeffs
-            )
-            total_error += cv2.norm(image_points_2d, projected_points, cv2.NORM_L2) ** 2
+print(f"\nRunning calibration on {captured} captures...")
 
-        mean_error = np.sqrt(total_error / len(captured_object_points))
-        np.savez(
-            OUTPUT_FILE,
-            camera_matrix=camera_matrix,
-            dist_coeffs=dist_coeffs,
-            mtx=camera_matrix,
-            dist=dist_coeffs,
-            image_size=np.array(image_size),
-            rms_error=rms_error,
-            mean_error=mean_error,
-        )
+ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.aruco.calibrateCameraCharuco(
+    all_charuco_corners, all_charuco_ids, board, (WIDTH, HEIGHT), None, None
+)
 
-        print(f"Saved calibration to: {OUTPUT_FILE}")
-        print(f"RMS reprojection error: {rms_error:.4f} pixels")
-        print(f"Mean reprojection error: {mean_error:.4f} pixels")
-        print("Camera matrix:")
-        print(camera_matrix)
-        print("Distortion coefficients:")
-        print(dist_coeffs.ravel())
-    finally:
-        picam2.stop()
-        cv2.destroyAllWindows()
+print("\n=======================================================")
+print(f"Calibration RMS reprojection error: {ret:.4f}  (lower is better, <1.0 is good)")
+print("\ncamera_matrix = np.array([")
+for row in camera_matrix:
+    print(f"    [{row[0]:.4f}, {row[1]:.4f}, {row[2]:.4f}],")
+print("], dtype=np.float32)")
+print("\ndist_coeffs = np.array([", ", ".join(f"{c:.6f}" for c in dist_coeffs.flatten()), "], dtype=np.float32)")
+print("=======================================================")
 
-
-if __name__ == "__main__":
-    main()
+np.savez("/home/rocket/camera_calibration.npz",
+         camera_matrix=camera_matrix, dist_coeffs=dist_coeffs, rms_error=ret)
+print("\nSaved to ~/camera_calibration.npz")
+print("Copy the camera_matrix / dist_coeffs values above into your ArUco detection script.")
