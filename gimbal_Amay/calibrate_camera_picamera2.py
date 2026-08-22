@@ -8,8 +8,8 @@ from picamera2 import Picamera2
 # =======================================================
 SQUARES_X = 7
 SQUARES_Y = 10
-SQUARE_LENGTH_M = 0.0105    # <-- measure your PRINTED board's square edge and update this
-MARKER_LENGTH_M = 0.007  # <-- measure your PRINTED board's marker edge and update this
+SQUARE_LENGTH_M = 0.03    # <-- measure your PRINTED board's square edge and update this
+MARKER_LENGTH_M = 0.022   # <-- measure your PRINTED board's marker edge and update this
 
 WIDTH, HEIGHT = 640, 480
 MIN_CAPTURES = 15  # aim for 15-25 good captures from varied angles/distances
@@ -44,9 +44,11 @@ try:
         display = frame.copy()
         if marker_ids is not None and len(marker_ids) > 0:
             cv2.aruco.drawDetectedMarkers(display, marker_corners, marker_ids)
-        if (charuco_ids is not None and charuco_corners is not None
-                and len(charuco_ids) > 0 and len(charuco_corners) == len(charuco_ids)):
-            cv2.aruco.drawDetectedCornersCharuco(display, charuco_corners, charuco_ids)
+        if charuco_ids is not None and charuco_corners is not None and len(charuco_ids) > 0:
+            try:
+                cv2.aruco.drawDetectedCornersCharuco(display, charuco_corners, charuco_ids)
+            except cv2.error:
+                pass  # shape mismatch on this frame, skip drawing, keep going
 
         cv2.putText(display, f"Captured: {captured}/{MIN_CAPTURES}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
@@ -54,8 +56,13 @@ try:
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord(' '):
-            if (charuco_ids is not None and charuco_corners is not None
-                    and len(charuco_ids) >= 6 and len(charuco_corners) == len(charuco_ids)):
+            valid = False
+            if charuco_ids is not None and charuco_corners is not None and len(charuco_ids) >= 6:
+                try:
+                    valid = (len(charuco_corners) == len(charuco_ids))
+                except Exception:
+                    valid = False
+            if valid:
                 all_charuco_corners.append(charuco_corners)
                 all_charuco_ids.append(charuco_ids)
                 captured += 1
