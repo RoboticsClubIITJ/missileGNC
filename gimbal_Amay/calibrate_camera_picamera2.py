@@ -8,8 +8,8 @@ from picamera2 import Picamera2
 # =======================================================
 SQUARES_X = 7
 SQUARES_Y = 10
-SQUARE_LENGTH_M = 0.03    # <-- measure your PRINTED board's square edge and update this
-MARKER_LENGTH_M = 0.022   # <-- measure your PRINTED board's marker edge and update this
+SQUARE_LENGTH_M = 0.0105   # <-- measure your PRINTED board's square edge and update this
+MARKER_LENGTH_M = 0.007  # <-- measure your PRINTED board's marker edge and update this
 
 WIDTH, HEIGHT = 640, 480
 MIN_CAPTURES = 15  # aim for 15-25 good captures from varied angles/distances
@@ -82,8 +82,22 @@ if captured < 4:
 
 print(f"\nRunning calibration on {captured} captures...")
 
-ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.aruco.calibrateCameraCharuco(
-    all_charuco_corners, all_charuco_ids, board, (WIDTH, HEIGHT), None, None
+# cv2.aruco.calibrateCameraCharuco was removed in newer OpenCV (4.7+).
+# Use the version-proof path: board.matchImagePoints() + cv2.calibrateCamera().
+all_obj_points = []
+all_img_points = []
+for corners, ids in zip(all_charuco_corners, all_charuco_ids):
+    obj_points, img_points = board.matchImagePoints(corners, ids)
+    if obj_points is not None and img_points is not None and len(obj_points) >= 4:
+        all_obj_points.append(obj_points)
+        all_img_points.append(img_points)
+
+if len(all_obj_points) < 4:
+    print("Not enough valid captures survived point-matching. Re-run and capture more varied angles.")
+    exit(1)
+
+ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
+    all_obj_points, all_img_points, (WIDTH, HEIGHT), None, None
 )
 
 print("\n=======================================================")
