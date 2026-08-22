@@ -46,14 +46,27 @@ def main():
         [0.0, 0.0, 1.0]
     ], dtype=np.float32)
 
-    calibration_file = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "calibration.npz"
-    )
     dist_coeffs = np.zeros((5, 1), dtype=np.float32)
-    if os.path.exists(calibration_file):
-        calibration = np.load(calibration_file)
-        camera_matrix = calibration["camera_matrix"].astype(np.float32)
-        dist_coeffs = calibration["dist_coeffs"].astype(np.float32)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    calibration_file = next(
+        (
+            path
+            for path in (
+                os.path.join(script_dir, "camera_calibration.npz"),
+                os.path.join(script_dir, "calibration.npz"),
+            )
+            if os.path.exists(path)
+        ),
+        None,
+    )
+    if calibration_file is not None:
+        with np.load(calibration_file) as calibration:
+            camera_matrix = calibration["camera_matrix"].astype(np.float32)
+            dist_coeffs = calibration["dist_coeffs"].reshape(-1, 1).astype(np.float32)
+
+        if camera_matrix.shape != (3, 3) or dist_coeffs.shape[0] < 4:
+            raise ValueError(f"Invalid calibration data in {calibration_file}")
+
         print(f"Loaded camera calibration from {calibration_file}")
     # =======================================================
 

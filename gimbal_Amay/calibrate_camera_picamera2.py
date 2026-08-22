@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import os
 import time
 from picamera2 import Picamera2
 
@@ -109,7 +110,10 @@ print("], dtype=np.float32)")
 print("\ndist_coeffs = np.array([", ", ".join(f"{c:.6f}" for c in dist_coeffs.flatten()), "], dtype=np.float32)")
 print("=======================================================")
 
-np.savez("/home/rocket/camera_calibration.npz",
+output_file = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "camera_calibration.npz"
+)
+np.savez(output_file,
          camera_matrix=camera_matrix, dist_coeffs=dist_coeffs, rms_error=ret)
-print("\nSaved to ~/camera_calibration.npz")
+print(f"\nSaved to {output_file}")
 print("Copy the camera_matrix / dist_coeffs values above into your ArUco detection script.")
