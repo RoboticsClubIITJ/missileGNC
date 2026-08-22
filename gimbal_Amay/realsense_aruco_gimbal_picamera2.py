@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import math
+import os
 import time
 from picamera2 import Picamera2
 
@@ -10,6 +11,7 @@ cv2.setNumThreads(4)
 def main():
     # Set the physical size of your printed ArUco marker in meters
     MARKER_SIZE = 0.05
+    ADAPTIVE_THRESH_WINDOWS = 1
 
     if not hasattr(cv2, "aruco"):
         raise RuntimeError(
@@ -44,8 +46,15 @@ def main():
         [0.0, 0.0, 1.0]
     ], dtype=np.float32)
 
-    # Assuming zero distortion until you run a calibration script
+    calibration_file = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "calibration.npz"
+    )
     dist_coeffs = np.zeros((5, 1), dtype=np.float32)
+    if os.path.exists(calibration_file):
+        calibration = np.load(calibration_file)
+        camera_matrix = calibration["camera_matrix"].astype(np.float32)
+        dist_coeffs = calibration["dist_coeffs"].astype(np.float32)
+        print(f"Loaded camera calibration from {calibration_file}")
     # =======================================================
 
     # Setup ArUco Dictionary and Parameters with optimizations
@@ -53,7 +62,7 @@ def main():
         dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
         parameters = cv2.aruco.DetectorParameters()
         parameters.adaptiveThreshWinSizeMin = 5
-        parameters.adaptiveThreshWinSizeMax = 15
+        parameters.adaptiveThreshWinSizeMax = 5 + (ADAPTIVE_THRESH_WINDOWS - 1) * 5
         parameters.adaptiveThreshWinSizeStep = 5
         detector = cv2.aruco.ArucoDetector(dictionary, parameters)
         legacy_api = False
@@ -61,7 +70,7 @@ def main():
         dictionary = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
         parameters = cv2.aruco.DetectorParameters_create()
         parameters.adaptiveThreshWinSizeMin = 5
-        parameters.adaptiveThreshWinSizeMax = 15
+        parameters.adaptiveThreshWinSizeMax = 5 + (ADAPTIVE_THRESH_WINDOWS - 1) * 5
         parameters.adaptiveThreshWinSizeStep = 5
         legacy_api = True
 
@@ -90,8 +99,8 @@ def main():
             else:
                 corners, ids, rejected = cv2.aruco.detectMarkers(gray, dictionary, parameters=parameters)
 
-            pitch, yaw, roll, x, y, z, distance = 0, 0, 0, 0, 0, 0, 0
             marker_array = None  # will hold [x, y, z, pitch, yaw] for the detected marker
+            pose_results = []
 
             if ids is not None and len(ids) > 0:
                 for i, corner in enumerate(corners):
@@ -108,15 +117,14 @@ def main():
                     distance = math.sqrt(x**2 + y**2 + z**2)
 
                     rot_mat, _ = cv2.Rodrigues(rvec)
-                    proj_mat = np.hstack((rot_mat, tvec))
-                    euler_angles = cv2.decomposeProjectionMatrix(proj_mat)[6]
-                    pitch, yaw, roll = euler_angles.flatten()
+                    pitch, yaw, roll = cv2.RQDecomp3x3(rot_mat)[0]
 
                     # [x, y, z] in meters (camera frame), pitch/yaw in degrees,
                     # distance in meters (straight-line from camera to marker).
                     # Overwritten each loop -> holds the LAST detected marker in
                     # this frame if multiple markers are visible at once.
                     marker_array = [float(x), float(y), float(z), float(pitch), float(yaw), float(distance)]
+                    pose_results.append((i, rvec, tvec, x, y, z, pitch, yaw, roll))
 
             end_time = time.perf_counter()
             # =======================================================
@@ -129,14 +137,7 @@ def main():
 
             if ids is not None and len(ids) > 0:
                 cv2.aruco.drawDetectedMarkers(display_frame, corners, ids)
-                for i, corner in enumerate(corners):
-                    success, rvec, tvec = cv2.solvePnP(
-                        marker_points, corner[0], camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_IPPE_SQUARE
-                    )
-
-                    if not success:
-                        continue
-
+                for i, rvec, tvec, x, y, z, pitch, yaw, roll in pose_results:
                     cv2.drawFrameAxes(display_frame, camera_matrix, dist_coeffs, rvec, tvec, MARKER_SIZE / 2)
 
                     print(f"Marker ID: {ids.flatten()[i]}")
