@@ -6,7 +6,7 @@
 %     Each run uses its OWN time base and plays to its OWN end time; the
 %     shorter run freezes on its final frame and is flagged COMPLETE.
 %  3. Signal comparison table in the Command Window
-%  4. Accuracy matrix (miss distance, time to CPA, path length, peak deflection)
+%  4. Accuracy matrix (miss distance, time to CPA, total distance, peak deflection)
 %
 %  Expects both models to log: Xm Ym Xt Yt Vmx Vmy Vm Vtx Vty Vt
 %                              gammaT gammaM Thrust ThrustAngle
@@ -185,10 +185,10 @@ mL  = metrics(Br);
 
 % {label, ideal value, limited value, decimals}
 rows = { ...
-  "Miss distance                (m)",     mI.miss,    mL.miss,    4; ...
-  "Time of closest approach     (s)",     mI.tMin,    mL.tMin,    4; ...
-  "Missile path length to CPA   (m)",     mI.pathLen, mL.pathLen, 2; ...
-  "Peak thrust deflection       (deg)",   mI.dMax,    mL.dMax,    3  };
+  "Miss distance                (m)",     mI.miss,      mL.miss,      4; ...
+  "Time of closest approach     (s)",     mI.tMin,      mL.tMin,      4; ...
+  "Total distance travelled     (m)",     mI.totalDist, mL.totalDist, 2; ...
+  "Peak thrust deflection       (deg)",   mI.dMax,      mL.dMax,      3  };
 
 nR = size(rows,1);
 Metric  = strings(nR,1); Ideal  = strings(nR,1);
@@ -426,8 +426,8 @@ function m = metrics(S)
     m.miss = S.minDist;
     m.tMin = S.t(S.minIdx);
 
-    k = S.minIdx;
-    m.pathLen = sum(hypot(diff(S.sig.xM(1:k)), diff(S.sig.yM(1:k))));
+    % total distance travelled over the WHOLE trajectory (not just to CPA)
+    m.totalDist = sum(hypot(diff(S.sig.xM), diff(S.sig.yM)));
 
     m.dMax = max(abs(rad2deg(S.TangRad)));
 end
