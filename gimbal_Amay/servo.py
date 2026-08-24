@@ -14,8 +14,18 @@ Assumptions:
   distance doesn't change.
 
 Geometry (z = fixed distance, not measured):
-  yaw_deg   = atan2(x, Z_FIXED)   -> positive = target right of center
-  pitch_deg = atan2(y, Z_FIXED)   -> positive = target below center
+  Each frame's (x, y) from ArUco is the marker's offset in the CURRENT
+  camera frame — i.e. relative to wherever the gimbal is pointed right
+  now, not relative to the original zero. Since the camera moves with
+  the gimbal, these offsets must be ACCUMULATED across frames to get
+  the marker's true offset from the original boresight:
+
+      x_abs += x_new      (running total, meters)
+      y_abs += y_new
+
+  Then:
+      yaw_deg   = atan2(x_abs, Z_FIXED)   -> absolute angle from start
+      pitch_deg = atan2(y_abs, Z_FIXED)
 
 Output is a DELTA angle: (target_angle - gimbal's current angle), i.e.
 how far to move the servo from where it already is, not an absolute
@@ -60,16 +70,14 @@ YAW_OFFSET_DEG   = 0.0
 PITCH_OFFSET_DEG = 0.0
 
 
-def marker_to_angles(x, y):
+def offset_to_angles(x_abs, y_abs):
     """
-    Camera-frame (x, y) meters -> (yaw_deg, pitch_deg) to point at it.
-
-    z is NOT taken from the ArUco detection — it's fixed at Z_FIXED
-    (the known camera-to-board distance), since the detected z is too
-    noisy to trust here and the board is a flat 2D plane at a known range.
+    Accumulated camera-frame offset (x_abs, y_abs) meters, measured from
+    the ORIGINAL boresight -> (yaw_deg, pitch_deg) absolute angle to
+    point at it. z is fixed at Z_FIXED (known board distance).
     """
-    yaw_deg = math.degrees(math.atan2(x, Z_FIXED)) + YAW_OFFSET_DEG
-    pitch_deg = math.degrees(math.atan2(y, Z_FIXED)) + PITCH_OFFSET_DEG
+    yaw_deg = math.degrees(math.atan2(x_abs, Z_FIXED)) + YAW_OFFSET_DEG
+    pitch_deg = math.degrees(math.atan2(y_abs, Z_FIXED)) + PITCH_OFFSET_DEG
     return yaw_deg, pitch_deg
 
 
@@ -84,12 +92,21 @@ def angle_to_pulsewidth(angle_deg, center_us):
 
 class GimbalController:
     """
-    pigpio servo driver with clamping. Tracks the gimbal's actual current
-    angle and moves it by the DELTA to the new target (new_angle - prev_angle),
-    rather than jumping to an absolute angle each frame.
+    pigpio servo driver with clamping. Accumulates each frame's camera-
+    relative (x, y) offset into an absolute offset from the original
+    boresight (since the camera moves with the gimbal), converts that to
+    an absolute target angle, and moves the gimbal by the DELTA from its
+    previous angle (target - prev_angle) rather than jumping to an
+    absolute angle each frame.
     """
 
     def __init__(self, start_yaw=0.0, start_pitch=0.0):
+        # Running total offset of the marker from the ORIGINAL boresight,
+        # in meters at the Z_FIXED plane. t=0: marker is at (x0, y0) -> this
+        # starts at 0 and accumulates as the gimbal (and camera) moves.
+        self._accum_x = 0.0
+        self._accum_y = 0.0
+
         # Actual current physical angle of the gimbal (not a target/setpoint).
         self._current_yaw = start_yaw
         self._current_pitch = start_pitch
@@ -102,11 +119,16 @@ class GimbalController:
 
     def update(self, x, y):
         """
-        Feed marker_array's x, y (z is fixed, see Z_FIXED above).
-        Computes target angle, moves the gimbal by (target - prev_angle),
-        drives servos, and returns (delta_yaw, delta_pitch, new_yaw, new_pitch).
+        Feed marker_array's x, y for the CURRENT frame (offset relative to
+        wherever the camera is pointed right now — z is fixed, see Z_FIXED).
+        Accumulates it into the absolute offset, computes the absolute
+        target angle, moves the gimbal by (target - prev_angle), drives
+        servos, and returns (delta_yaw, delta_pitch, new_yaw, new_pitch).
         """
-        target_yaw, target_pitch = marker_to_angles(x, y)
+        self._accum_x += x
+        self._accum_y += y
+
+        target_yaw, target_pitch = offset_to_angles(self._accum_x, self._accum_y)
 
         delta_yaw = target_yaw - self._current_yaw
         delta_pitch = target_pitch - self._current_pitch
@@ -152,15 +174,18 @@ class GimbalController:
 # ---------------------------------------------------------------
 if __name__ == "__main__":
     gimbal = GimbalController()
+    # Each tuple is x1, y1 as measured in the CURRENT camera frame for that
+    # frame — i.e. what marker_array[0], marker_array[1] gives you each loop,
+    # already relative to wherever the gimbal is currently pointed.
     test_samples = [
-        (0.02, -0.01),
-        (0.05, 0.00),
-        (-0.03, 0.02),
+        (0.02, -0.01),   # t=0: marker at x0,y0 -> gimbal turns to center it
+        (0.01, 0.00),    # t=1: marker moved slightly, re-detected offset
+        (-0.03, 0.02),   # t=2: marker moved further
     ]
     try:
         for x, y in test_samples:
             d_yaw, d_pitch, yaw_deg, pitch_deg = gimbal.update(x, y)
-            print(f"x={x:+.3f} y={y:+.3f}  ->  delta_yaw={d_yaw:+.2f}deg  delta_pitch={d_pitch:+.2f}deg  "
+            print(f"frame x={x:+.3f} y={y:+.3f}  ->  delta_yaw={d_yaw:+.2f}deg  delta_pitch={d_pitch:+.2f}deg  "
                   f"(abs yaw={yaw_deg:+.1f}deg pitch={pitch_deg:+.1f}deg)")
             time.sleep(0.5)
     finally:
