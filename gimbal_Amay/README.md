@@ -25,6 +25,22 @@ Pan/tilt servos       GimbalUDPReceiver.m
 
 `servo.py` is the normal runtime entry point. It performs detection, servo control, and UDP transmission in one process.
 
+## Quick Start Checklist
+
+Complete these steps in this order:
+
+1. Measure the physical ArUco marker edge and set `MARKER_SIZE` in `gimbal_config.py`.
+2. Run camera calibration and confirm that `camera_calibration.npz` is saved in this folder.
+3. Run screen-distance calibration and confirm that `z_distance.json` is saved in this folder.
+4. Find the MATLAB computer's IP address and set `SIMULINK_HOST` in `gimbal_config.py`.
+5. Put `GimbalUDPReceiver.m` on the MATLAB path.
+6. Test the UDP link with `build_udp_monitor_model.m`.
+7. Add the receiver and Demux blocks to `anjaneya_V7.slx`.
+8. Verify signal units and coordinate signs with Scopes.
+9. Start the full guidance model only after the measurement signals look correct.
+
+Do not start with the servos attached to the full mechanical assembly. First test camera detection and UDP reception, then test servo movement with safe mechanical limits.
+
 ## Files
 
 - `servo.py`: Main runtime program. Reads camera frames, calls the ArUco detector, calculates servo angles, drives the servos, and sends UDP packets.
@@ -35,6 +51,28 @@ Pan/tilt servos       GimbalUDPReceiver.m
 - `GimbalUDPReceiver.m`: MATLAB System object that receives the UDP pose packets.
 - `build_udp_monitor_model.m`: Creates a small Simulink test model for checking the UDP connection.
 - `README.md`: This guide.
+
+## What Happens During One Frame
+
+When `servo.py` is running, the following sequence repeats for every camera frame:
+
+1. `Picamera2` captures a `640 x 480` image.
+2. The image is converted to grayscale for ArUco detection.
+3. `aruco_gimbal_picamera2.py` searches for markers from the `DICT_6X6_250` dictionary.
+4. The first detected marker is passed to OpenCV `solvePnP()` together with the marker size and camera calibration.
+5. `solvePnP()` returns the marker translation `(x, y, z)` in meters. Rotation is converted into `pitch` and `yaw`, and straight-line distance is calculated.
+6. The six values are stored in this order:
+
+   ```text
+   [x, y, z, pitch, yaw, distance]
+   ```
+
+7. The same pose is sent to MATLAB as a UDP datagram.
+8. The `x` and `y` values are passed to `GimbalController`.
+9. The controller calculates the desired pan and tilt angles, clamps them to the configured limits, converts them to pulse widths, and commands the servos through `pigpio`.
+10. The camera frame is displayed. Pressing `q` exits the loop and releases the hardware and network resources.
+
+If no marker is detected, no UDP pose packet is sent and the servo controller is not updated for that frame. The MATLAB receiver keeps its previous pose and reports `isNew = false`.
 
 ## Hardware and Software
 
@@ -52,6 +90,28 @@ MATLAB requires:
 - Simulink
 - Instrument Control Toolbox for `udpport`
 - The folder containing `GimbalUDPReceiver.m` on the MATLAB path
+
+### Hardware checklist
+
+- Power the servos from a suitable external supply. Do not rely on the Raspberry Pi 5 V rail for high-current servo loads.
+- Connect the Raspberry Pi ground and the servo power-supply ground together.
+- Confirm that the GPIO numbers in `gimbal_config.py` use BCM numbering.
+- Mount the camera rigidly to the gimbal so that camera movement corresponds to servo movement.
+- Place the marker far enough away that it remains inside the camera field of view during the motion.
+- Keep an emergency way to disconnect servo power during initial testing.
+
+### Software checklist
+
+On the Raspberry Pi, verify:
+
+```bash
+python3 --version
+python3 -c "import cv2, numpy, picamera2"
+python3 -c "import cv2; print(hasattr(cv2, 'aruco'))"
+systemctl status pigpiod
+```
+
+The last Python command must print `True`. If `picamera2` or `pigpio` cannot be imported, install the packages on the Raspberry Pi or select the correct Python interpreter.
 
 ## Python Setup
 
@@ -178,6 +238,28 @@ The controller keeps the current servo angle, calculates the required change, cl
 
 The current controller accumulates the detected `x` and `y` offsets over frames. This assumes each new detection is a camera-relative correction produced after the gimbal moves. If the target is stationary and the camera is not moving with the gimbal, this accumulation behavior should be changed before use.
 
+### Meaning of the controller outputs
+
+`GimbalController.update(x, y)` returns four values:
+
+```text
+delta_yaw, delta_pitch, current_yaw, current_pitch
+```
+
+- `delta_yaw`: change requested for the pan axis in degrees
+- `delta_pitch`: change requested for the tilt axis in degrees
+- `current_yaw`: current clamped pan angle estimate
+- `current_pitch`: current clamped tilt angle estimate
+
+The pulse-width conversion is:
+
+```python
+pan_pulse_us = PAN_CENTER_US + current_yaw * US_PER_DEGREE
+tilt_pulse_us = TILT_CENTER_US + current_pitch * US_PER_DEGREE
+```
+
+If the gimbal moves in the wrong direction, correct the sign or the relevant `YAW_OFFSET_DEG`/`PITCH_OFFSET_DEG` after testing at low limits. Do not solve a direction problem by increasing the servo limits.
+
 ## UDP Packet Format
 
 For every valid marker detection, `servo.py` sends one UDP datagram to `SIMULINK_HOST:SIMULINK_PORT`.
@@ -293,6 +375,31 @@ Open the final model and perform these steps:
 8. Connect output 1 of the receiver to the Demux input.
 9. Connect the six Demux outputs to signal labels, Scopes, or the appropriate guidance inputs.
 
+The resulting basic Simulink layout should look like this:
+
+```text
+[MATLAB System: GimbalUDPReceiver]
+                     |
+                     v
+            [Demux, 6 outputs]
+               |  |  |  |  |  |
+               X  Y  Z  P  Y  D
+```
+
+For the first test, connect each Demux output to a Scope. This confirms the receiver and packet ordering before any signal is connected to the missile guidance loop.
+
+#### MATLAB System block parameters
+
+The block uses these values:
+
+| Parameter | Value | Meaning |
+|---|---:|---|
+| System object | `GimbalUDPReceiver` | MATLAB class in this folder |
+| Port | `25000` | UDP port shared with Python |
+| LocalIP | `0.0.0.0` | Listen on all local network interfaces |
+
+Only one process should bind to UDP port `25000` on the MATLAB computer. Close the monitor model before starting another model that uses the same receiver port.
+
 The receiver has three outputs:
 
 ```text
@@ -341,6 +448,41 @@ Run the model with the receiver connected but with the guidance or actuator subs
 - No degree/radian conversion or sign inversion is missing.
 
 Only after these checks should the pose signals be connected to the active guidance and control path.
+
+### Simulink first-run procedure
+
+Use this sequence for the first complete test:
+
+1. Open MATLAB on the computer that will receive the packets.
+2. Add the `gimbal_Amay` folder to the MATLAB path.
+3. Run `which GimbalUDPReceiver` and confirm the correct file is found.
+4. Open the monitor model or `anjaneya_V7.slx` with the receiver block configured.
+5. Start the Simulink model with the servo/guidance actuator path disabled.
+6. On the Raspberry Pi, start `python3 servo.py`.
+7. Hold one marker in front of the camera.
+8. Confirm that `X`, `Y`, `Z`, and `Distance` are nonzero and physically reasonable.
+9. Move the marker horizontally and vertically and confirm that only the expected coordinates change significantly.
+10. Cover the marker and confirm that `isNew` changes to false while the last pose is held.
+11. Reconnect the pose values to the intended guidance inputs.
+12. Enable the guidance and actuator path with conservative limits.
+
+### Expected network behavior
+
+The Python terminal prints a pose only when the marker is detected. MATLAB should show the sequence number increasing by one for every received pose packet. The sequence number may skip values if Simulink runs slower than the camera; this is expected because the receiver drains old datagrams and keeps the newest one.
+
+The UDP sender does not wait for an acknowledgement. Therefore, a Python message such as `sendto()` succeeding only means that the operating system accepted the datagram locally. The monitor scopes are the proof that MATLAB received and decoded it.
+
+### Connecting to existing model signals
+
+Do not assume that `x`, `y`, `pitch`, and `yaw` can be connected directly to every input in `anjaneya_V7`. Check each destination input for:
+
+- expected physical quantity
+- units: meters, degrees, or radians
+- coordinate frame: camera, world, missile, or screen frame
+- sign convention: positive right/up or positive right/down
+- required sample time and data type
+
+Use Signal Conversion, Gain, Unit Delay, or Rate Transition blocks where the existing model requires them. Keep the raw receiver signals on Scopes so a conversion error can be identified quickly.
 
 ## Connection Troubleshooting
 
