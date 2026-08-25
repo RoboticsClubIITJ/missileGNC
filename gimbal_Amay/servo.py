@@ -30,6 +30,55 @@ Geometry (z = fixed distance, not measured):
 Output is a DELTA angle: (target_angle - gimbal's current angle), i.e.
 how far to move the servo from where it already is, not an absolute
 angle to jump to.
+I’ll quickly re-check the current integration points so the explanation matches the files as they exist now, including any edits made after the previous change.
+
+Read 
+
+Read , lines 1 to 220
+
+Read 
+
+I changed the folder so the intended flow is:
+
+1. `gimbal_config.py`
+   - Loads camera calibration from `camera_calibration.npz`.
+   - Loads the measured screen distance from `z_distance.json`.
+   - Stores shared servo settings such as GPIO pins, limits, pulse widths, and offsets.
+
+2. `aruco_gimbal_picamera2.py`
+   - Detects the ArUco marker.
+   - Uses `solvePnP()` to calculate:
+     - `x`, `y`, `z` position
+     - marker rotation
+     - straight-line distance
+   - Intended to expose this through `detect_marker_pose()` so another script can call it.
+
+3. `servo.py`
+   - Imports the detector from `aruco_gimbal_picamera2.py`.
+   - Captures camera frames.
+   - Gets the marker coordinates.
+   - Sends `x` and `y` into `GimbalController.update()`.
+   - Converts the coordinates into pan and tilt angles.
+   - Converts angles into servo pulse widths.
+   - Uses the shared values from `gimbal_config.py` instead of duplicating servo constants.
+   - Prints the calculated angles and configured screen distance.
+
+The controller calculates angles approximately like this:
+
+```python
+yaw = atan2(x, screen_distance)
+pitch = atan2(y, screen_distance)
+```
+
+It also clamps the angles to the mechanical servo limits before driving the servos.
+
+However, I checked the current files and your later edits have reverted part of the integration. Currently, `servo.py` still imports:
+
+```python
+from aruco_gimbal_picamera2 import create_aruco_detector, detect_marker_pose
+```
+
+but the current `aruco_gimbal_picamera2.py` no longer contains those functions. Therefore, running `servo.py` will currently fail with an import error. The integration needs one more repair to restore those functions or change `servo.py` to match the current detector code.
 """
 
 import math
