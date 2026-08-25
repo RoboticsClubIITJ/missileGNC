@@ -34,6 +34,8 @@ angle to jump to.
 
 import math
 import time
+import cv2
+from picamera2 import Picamera2
 
 try:
     import pigpio
@@ -45,29 +47,25 @@ except ImportError:
 # ArUco pose estimation is noisy/unreliable at this range, so it is NOT
 # used for the angle math — only x and y (position on the 2D board) matter.
 # Replace this import with wherever you actually define/measure it.
-try:
-    from gimbal_config import SCREEN_DISTANCE_M as Z_FIXED
-except ImportError:
-    Z_FIXED = 0.40  # placeholder — set to your real camera-to-screen distance
+from gimbal_config import (
+    PAN_GPIO,
+    TILT_GPIO,
+    PAN_CENTER_US,
+    TILT_CENTER_US,
+    US_PER_DEGREE,
+    PAN_LIMIT_DEG,
+    TILT_LIMIT_DEG,
+    YAW_OFFSET_DEG,
+    PITCH_OFFSET_DEG,
+    SCREEN_DISTANCE_M as Z_FIXED,
+)
+from aruco_gimbal_picamera2 import create_aruco_detector, detect_marker_pose
 
 
 # ---------------------------------------------------------------
 # Gimbal geometry / calibration constants — TUNE THESE FOR YOUR RIG
 # ---------------------------------------------------------------
-PAN_GPIO   = 18       # BCM pin driving pan (yaw) servo
-TILT_GPIO  = 19       # BCM pin driving tilt (pitch) servo
-
-PAN_CENTER_US   = 1500   # pulse width (us) at yaw = 0 deg
-TILT_CENTER_US  = 1500   # pulse width (us) at pitch = 0 deg
-US_PER_DEGREE   = 10.0   # servo-specific: us change per degree of travel
-
-PAN_LIMIT_DEG   = (-90.0, 90.0)   # mechanical yaw limits
-TILT_LIMIT_DEG  = (-45.0, 45.0)   # mechanical pitch limits
-
-# If the camera's optical axis isn't exactly aligned with the gimbal's
-# mechanical zero, correct for it here (degrees).
-YAW_OFFSET_DEG   = 0.0
-PITCH_OFFSET_DEG = 0.0
+# Servo and geometry values are loaded from gimbal_config.py above.
 
 
 def offset_to_angles(x_abs, y_abs):
@@ -164,29 +162,55 @@ class GimbalController:
             self.pi.stop()
 
 
-# ---------------------------------------------------------------
-# Integration point: call gimbal.update(x, y) inside your
-# aruco_gimbal_picamera2.py loop, right where marker_array is built.
-# z is ignored (fixed distance, see Z_FIXED above).
-#
-#   marker_array = [x, y, z, pitch, yaw, distance]
-#   gimbal.update(marker_array[0], marker_array[1])
-# ---------------------------------------------------------------
-if __name__ == "__main__":
+def process_marker(marker_array, gimbal):
+    """Process one detection and return servo angles plus configured distance."""
+    if marker_array is None:
+        return None
+    delta_yaw, delta_pitch, yaw, pitch = gimbal.update(
+        marker_array[0], marker_array[1]
+    )
+    return delta_yaw, delta_pitch, yaw, pitch, Z_FIXED
+
+
+def main():
+    picam2 = Picamera2()
+    camera_config = picam2.create_video_configuration(
+        main={"size": (640, 480), "format": "RGB888"}
+    )
+    picam2.configure(camera_config)
+    picam2.start()
+    time.sleep(2)
+
+    detector, dictionary, parameters, legacy_api = create_aruco_detector()
     gimbal = GimbalController()
-    # Each tuple is x1, y1 as measured in the CURRENT camera frame for that
-    # frame — i.e. what marker_array[0], marker_array[1] gives you each loop,
-    # already relative to wherever the gimbal is currently pointed.
-    test_samples = [
-        (0.02, -0.01),   # t=0: marker at x0,y0 -> gimbal turns to center it
-        (0.01, 0.00),    # t=1: marker moved slightly, re-detected offset
-        (-0.03, 0.02),   # t=2: marker moved further
-    ]
+
     try:
-        for x, y in test_samples:
-            d_yaw, d_pitch, yaw_deg, pitch_deg = gimbal.update(x, y)
-            print(f"frame x={x:+.3f} y={y:+.3f}  ->  delta_yaw={d_yaw:+.2f}deg  delta_pitch={d_pitch:+.2f}deg  "
-                  f"(abs yaw={yaw_deg:+.1f}deg pitch={pitch_deg:+.1f}deg)")
-            time.sleep(0.5)
+        while True:
+            frame = picam2.capture_array()
+            marker_array, corners, ids = detect_marker_pose(
+                frame, detector, dictionary, parameters, legacy_api
+            )
+            servo_result = process_marker(marker_array, gimbal)
+
+            if servo_result is not None:
+                delta_yaw, delta_pitch, yaw, pitch, distance = servo_result
+                print(
+                    f"x={marker_array[0]:+.3f}m y={marker_array[1]:+.3f}m | "
+                    f"delta yaw={delta_yaw:+.2f} deg, delta pitch={delta_pitch:+.2f} deg | "
+                    f"yaw={yaw:+.2f} deg, pitch={pitch:+.2f} deg | "
+                    f"screen distance={distance:.3f}m"
+                )
+
+            if ids is not None:
+                cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+            cv2.imshow("Gimbal servo control", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
     finally:
         gimbal.stop()
+        picam2.stop()
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()

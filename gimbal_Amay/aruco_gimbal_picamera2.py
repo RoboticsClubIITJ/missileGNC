@@ -4,13 +4,76 @@ import math
 import os
 import time
 from picamera2 import Picamera2
+from gimbal_config import CAMERA_MATRIX, DIST_COEFFS, MARKER_SIZE
 
 # Force OpenCV to utilize all 4 Raspberry Pi CPU cores for operations
 cv2.setNumThreads(4)
 
+
+def marker_object_points():
+    return np.array([
+        [-MARKER_SIZE / 2,  MARKER_SIZE / 2, 0],
+        [ MARKER_SIZE / 2,  MARKER_SIZE / 2, 0],
+        [ MARKER_SIZE / 2, -MARKER_SIZE / 2, 0],
+        [-MARKER_SIZE / 2, -MARKER_SIZE / 2, 0]
+    ], dtype=np.float32)
+
+
+def create_aruco_detector():
+    if not hasattr(cv2, "aruco"):
+        raise RuntimeError(
+            "OpenCV was built without ArUco support. Install an opencv-contrib build."
+        )
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+    if hasattr(cv2.aruco, "ArucoDetector"):
+        parameters = cv2.aruco.DetectorParameters()
+        parameters.adaptiveThreshWinSizeMin = 5
+        parameters.adaptiveThreshWinSizeMax = 5
+        parameters.adaptiveThreshWinSizeStep = 5
+        return cv2.aruco.ArucoDetector(dictionary, parameters), dictionary, parameters, False
+    parameters = cv2.aruco.DetectorParameters_create()
+    parameters.adaptiveThreshWinSizeMin = 5
+    parameters.adaptiveThreshWinSizeMax = 5
+    parameters.adaptiveThreshWinSizeStep = 5
+    return None, dictionary, parameters, True
+
+
+def detect_markers(gray, detector, dictionary, parameters, legacy_api):
+    if legacy_api:
+        return cv2.aruco.detectMarkers(gray, dictionary, parameters=parameters)
+    return detector.detectMarkers(gray)
+
+
+def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
+                       detection_scale=0.75):
+    """Detect the first marker and return [x, y, z, pitch, yaw, distance]."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    detection_gray = cv2.resize(
+        gray, None, fx=detection_scale, fy=detection_scale,
+        interpolation=cv2.INTER_AREA
+    )
+    corners, ids, _ = detect_markers(
+        detection_gray, detector, dictionary, parameters, legacy_api
+    )
+    if ids is None or len(ids) == 0:
+        return None, corners, ids
+    corners = [corner / detection_scale for corner in corners]
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    corners = [cv2.cornerSubPix(gray, corner.astype(np.float32), (5, 5), (-1, -1), criteria)
+               for corner in corners]
+    success, rvec, tvec = cv2.solvePnP(
+        marker_object_points(), corners[0][0], CAMERA_MATRIX, DIST_COEFFS,
+        flags=cv2.SOLVEPNP_IPPE_SQUARE
+    )
+    if not success:
+        return None, corners, ids
+    x, y, z = tvec.flatten()
+    rotation_matrix, _ = cv2.Rodrigues(rvec)
+    pitch, yaw, _ = cv2.RQDecomp3x3(rotation_matrix)[0]
+    distance = math.sqrt(x ** 2 + y ** 2 + z ** 2)
+    return [float(x), float(y), float(z), float(pitch), float(yaw), float(distance)], corners, ids
+
 def main():
-    # Set the physical size of your printed ArUco marker in meters
-    MARKER_SIZE = 0.05
     ADAPTIVE_THRESH_WINDOWS = 1
     DETECTION_SCALE = 0.75
 
