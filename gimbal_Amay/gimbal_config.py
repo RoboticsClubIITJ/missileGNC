@@ -193,6 +193,11 @@ TILT_LIMIT_DEG = (-45.0, 45.0)
 YAW_OFFSET_DEG = 0.0
 PITCH_OFFSET_DEG = 0.0
 
+# Simulink UDP receiver settings. Set SIMULINK_HOST to the IP address of the
+# computer running anjaneya_V7.slx.
+SIMULINK_HOST = "192.168.1.50"
+SIMULINK_PORT = 25000
+
 
 if __name__ == "__main__":
     import sys

@@ -83,6 +83,8 @@ but the current `aruco_gimbal_picamera2.py` no longer contains those functions. 
 
 import math
 import time
+import socket
+import struct
 import cv2
 from picamera2 import Picamera2
 
@@ -107,6 +109,8 @@ from gimbal_config import (
     YAW_OFFSET_DEG,
     PITCH_OFFSET_DEG,
     SCREEN_DISTANCE_M as Z_FIXED,
+    SIMULINK_HOST,
+    SIMULINK_PORT,
 )
 from aruco_gimbal_picamera2 import create_aruco_detector, detect_marker_pose
 
@@ -221,6 +225,27 @@ def process_marker(marker_array, gimbal):
     return delta_yaw, delta_pitch, yaw, pitch, Z_FIXED
 
 
+class SimulinkPoseStreamer:
+    """Send [x, y, z, pitch, yaw, distance] pose packets over UDP."""
+
+    def __init__(self, host=SIMULINK_HOST, port=SIMULINK_PORT):
+        self.address = (host, port)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sequence = 0
+
+    def send(self, marker_array):
+        if marker_array is None:
+            return
+        if len(marker_array) != 6:
+            raise ValueError("marker_array must contain six pose values")
+        packet = struct.pack("<6dI", *marker_array, self.sequence)
+        self.socket.sendto(packet, self.address)
+        self.sequence = (self.sequence + 1) & 0xFFFFFFFF
+
+    def close(self):
+        self.socket.close()
+
+
 def main():
     picam2 = Picamera2()
     camera_config = picam2.create_video_configuration(
@@ -232,6 +257,7 @@ def main():
 
     detector, dictionary, parameters, legacy_api = create_aruco_detector()
     gimbal = GimbalController()
+    simulink = SimulinkPoseStreamer()
 
     try:
         while True:
@@ -239,6 +265,7 @@ def main():
             marker_array, corners, ids = detect_marker_pose(
                 frame, detector, dictionary, parameters, legacy_api
             )
+            simulink.send(marker_array)
             servo_result = process_marker(marker_array, gimbal)
 
             if servo_result is not None:
@@ -257,6 +284,7 @@ def main():
                 break
     finally:
         gimbal.stop()
+        simulink.close()
         picam2.stop()
         cv2.destroyAllWindows()
 
