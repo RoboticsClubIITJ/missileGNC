@@ -204,51 +204,143 @@ The sequence number increments for each packet and wraps after `0xFFFFFFFF`.
 
 ## MATLAB and Simulink Setup
 
-The UDP receiver is in `GimbalUDPReceiver.m`. Add this folder to the MATLAB path:
+The Simulink computer is the UDP receiver. The Raspberry Pi running `servo.py` is the UDP sender. Start the receiver model before moving the marker or enabling the servos.
+
+### 1. Check MATLAB requirements
+
+Install or enable:
+
+- MATLAB
+- Simulink
+- Instrument Control Toolbox, which provides `udpport`
+
+The MATLAB release must support `udpport` and MATLAB System blocks. `GimbalUDPReceiver.m` is a `matlab.System` object and cannot be used as a normal MATLAB Function block.
+
+### 2. Add the receiver folder to the MATLAB path
+
+Run this in MATLAB, replacing the path with the actual location on the Simulink computer:
 
 ```matlab
-cd("/path/to/gimbal_Amay")
-addpath(pwd)
+gimbalFolder = "path/to/missileGNC/gimbal_Amay";
+addpath(gimbalFolder);
+savepath; % Optional: make the path persistent
+which GimbalUDPReceiver
 ```
 
-### Test with the monitor model
+The final command must print the path to `GimbalUDPReceiver.m`. If it does not, the MATLAB path is wrong.
 
-Run:
+### 3. Configure the network
+
+Find the MATLAB computer's local IP address and put it in `gimbal_config.py` on the Raspberry Pi:
+
+```python
+SIMULINK_HOST = "192.168.1.50"
+SIMULINK_PORT = 25000
+```
+
+The MATLAB receiver listens on:
+
+```text
+LocalIP: 0.0.0.0
+Port: 25000
+```
+
+Allow incoming UDP traffic on port `25000` in the MATLAB computer's firewall. Confirm that the Raspberry Pi and MATLAB computer are on the same network. UDP does not establish a connection, so a successful Python run alone does not prove that MATLAB is receiving packets.
+
+### 4. Test the UDP link first
+
+From MATLAB, run:
 
 ```matlab
+cd(gimbalFolder)
 build_udp_monitor_model
 ```
 
-This creates and opens `gimbal_Amay_udp_monitor.slx`. Start the model, then start `servo.py`. The scopes should show:
+This creates and opens `gimbal_Amay_udp_monitor.slx`. Start that model, then run `servo.py` on the Raspberry Pi:
 
-1. X
-2. Y
-3. Z
-4. Pitch
-5. Yaw
-6. Distance
-
-The receiver also provides a sequence number and an `isNew` flag.
-
-### Connect to `anjaneya_V7.slx`
-
-The final `anjaneya_V7.slx` model must contain a MATLAB System block configured as:
-
-```text
-System: GimbalUDPReceiver
-Port: 25000
-LocalIP: 0.0.0.0
+```bash
+cd /path/to/gimbal_Amay
+python3 servo.py
 ```
 
-The receiver's first output is a six-element vector:
+The monitor scopes should receive these six values:
+
+1. `X`: marker horizontal position, meters
+2. `Y`: marker vertical position, meters
+3. `Z`: marker forward position, meters
+4. `Pitch`: marker rotation, degrees
+5. `Yaw`: marker rotation, degrees
+6. `Distance`: straight-line camera-to-marker distance, meters
+
+The receiver also outputs `seq`, the packet sequence number, and `isNew`, which is true only when a new packet arrived. If the marker disappears, the receiver holds the last pose and sets `isNew` to false.
+
+### 5. Add the receiver to `anjaneya_V7.slx`
+
+Open the final model and perform these steps:
+
+1. Add a **MATLAB System** block from the Simulink Library Browser. The block is usually under **User-Defined Functions > MATLAB System**.
+2. Open the block parameters.
+3. Set **System object name** to:
+
+   ```text
+   GimbalUDPReceiver
+   ```
+
+4. Set `Port` to `25000`.
+5. Set `LocalIP` to `0.0.0.0`.
+6. Add a **Demux** block from **Signal Routing**.
+7. Set the Demux number of outputs to `6`.
+8. Connect output 1 of the receiver to the Demux input.
+9. Connect the six Demux outputs to signal labels, Scopes, or the appropriate guidance inputs.
+
+The receiver has three outputs:
 
 ```text
-[x, y, z, pitch, yaw, distance]
+Output 1: pose = [x y z pitch yaw distance]
+Output 2: seq  = uint32 packet counter
+Output 3: isNew = boolean fresh-packet flag
 ```
 
-Connect it to a Demux block with six outputs. Connect the required signals to the appropriate inputs of the `anjaneya_V7` guidance model. The exact connections depend on whether the model expects position, line-of-sight angles, or another derived quantity.
+Do not connect the six-element pose vector directly to a scalar model input. Demux it first, or use a Selector block to select the required elements.
 
-The second receiver output is `seq` and the third is `isNew`. Use `isNew` if the model should distinguish fresh detections from held values when the marker temporarily leaves the camera view.
+### 6. Map the pose to the missile model
+
+The UDP receiver only transports measurements. It does not automatically know which `anjaneya_V7` input represents a target position or line-of-sight measurement.
+
+Before connecting signals, check the existing model input labels and units:
+
+- Use `x` and `y` if the model expects marker position in meters.
+- Use `pitch` and `yaw` if the model expects measured angles in degrees, converting to radians if required.
+- Use `distance` if the model needs range.
+- Use `z` only if the model needs the marker's forward camera coordinate.
+
+If the model expects radians, insert a **Gain** block with gain `pi/180` on the degree-valued pitch or yaw signals. If it expects a different coordinate direction, insert a **Gain** block with `-1` where necessary and document that convention in the model.
+
+Use the `isNew` output to prevent stale measurements from updating the guidance logic. A common arrangement is:
+
+```text
+GimbalUDPReceiver -> Demux -> pose conversion -> guidance input
+                |
+                +-> isNew -> Enabled Subsystem or validity logic
+```
+
+### 7. Configure model timing
+
+Set a discrete or fixed-step solver for the real-time receiver model. The UDP receiver is polled once per Simulink sample hit. Choose a sample time appropriate for the camera update rate, for example `0.02` seconds for approximately 50 Hz, and ensure the model can execute faster than that.
+
+Avoid using a very large step size: the receiver intentionally drains queued datagrams and keeps only the newest packet, so a slow model will skip intermediate camera frames.
+
+### 8. Validate inside `anjaneya_V7`
+
+Run the model with the receiver connected but with the guidance or actuator subsystem disabled first. Add Scopes or `To Workspace` blocks to verify:
+
+- X and Y change when the marker moves horizontally and vertically.
+- Distance remains physically reasonable.
+- `seq` increases when packets arrive.
+- `isNew` becomes false when the marker is hidden.
+- No degree/radian conversion or sign inversion is missing.
+
+Only after these checks should the pose signals be connected to the active guidance and control path.
 
 ## Connection Troubleshooting
 
