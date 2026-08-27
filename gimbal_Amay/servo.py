@@ -86,7 +86,11 @@ import time
 import socket
 import struct
 import cv2
-from picamera2 import Picamera2
+
+try:
+    from picamera2 import Picamera2
+except ImportError:  # pragma: no cover - only on non-Pi hosts
+    Picamera2 = None
 
 try:
     import pigpio
@@ -247,6 +251,12 @@ class SimulinkPoseStreamer:
 
 
 def main():
+    if Picamera2 is None:
+        raise RuntimeError(
+            "picamera2 is not installed on this machine. "
+            "The gimbal servo script requires a Raspberry Pi camera stack."
+        )
+
     picam2 = Picamera2()
     camera_config = picam2.create_video_configuration(
         main={"size": (640, 480), "format": "RGB888"}
