@@ -183,13 +183,17 @@ else:
 PAN_GPIO = 18
 TILT_GPIO = 19
 
+# Bench-calibrated starting values from servo sweep:
+# 1100 -> 1300 us gave approx 25 deg travel, so ~8 us/deg.
 PAN_CENTER_US = 1500
 TILT_CENTER_US = 1500
-US_PER_DEGREE = 10.0
+US_PER_DEGREE = 8.0
 
-PAN_LIMIT_DEG = (-90.0, 90.0)
-TILT_LIMIT_DEG = (-45.0, 45.0)
+# Conservative initial mechanical limits for safe testing.
+PAN_LIMIT_DEG = (-30.0, 30.0)
+TILT_LIMIT_DEG = (-20.0, 20.0)
 
+# Keep zero offsets at neutral until the physical axis direction is checked.
 YAW_OFFSET_DEG = 0.0
 PITCH_OFFSET_DEG = 0.0
 
