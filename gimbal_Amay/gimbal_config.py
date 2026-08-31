@@ -24,6 +24,13 @@ import time
 import math
 import numpy as np
 
+#load files from env
+from dotenv import load_dotenv
+load_dotenv()
+
+SIMULINK_HOST = os.getenv("SIMULINK_HOST")
+SIMULINK_PORT = int(os.getenv("SIMULINK_PORT", 25000))
+
 # ---------------------------------------------------------------
 # Camera intrinsics — loaded from calibration file
 # ---------------------------------------------------------------
@@ -199,8 +206,8 @@ PITCH_OFFSET_DEG = 0.0
 
 # Simulink UDP receiver settings. Set SIMULINK_HOST to the IP address of the
 # computer running anjaneya_V7.slx.
-SIMULINK_HOST = "192.168.1.50"
-SIMULINK_PORT = 25000
+SIMULINK_HOST = SIMULINK_HOST
+SIMULINK_PORT = SIMULINK_PORT
 
 
 if __name__ == "__main__":
