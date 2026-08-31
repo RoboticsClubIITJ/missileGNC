@@ -1,92 +1,15 @@
-"""
-aruco_gimbal_control.py
 
-Converts an ArUco marker's camera-frame pose (x, y, z in meters, from
-aruco_gimbal_picamera2.py's marker_array) into pan (yaw) and tilt (pitch)
-servo angles for a 2-axis gimbal, and drives the servos via pigpio.
-
-Assumptions:
-- Camera is mounted at (or its offset from) the gimbal's pan/tilt axis.
-- Standard OpenCV camera frame: +x = right, +y = down, +z = forward.
-- Target is a flat 2D board at a KNOWN, FIXED distance from the camera
-  (Z_FIXED, imported from config). The z coordinate from ArUco pose
-  estimation is NOT used — it's noisy and unnecessary since the board's
-  distance doesn't change.
-
-Geometry (z = fixed distance, not measured):
-  Each frame's (x, y) from ArUco is the marker's offset in the CURRENT
-  camera frame — i.e. relative to wherever the gimbal is pointed right
-  now, not relative to the original zero. Since the camera moves with
-  the gimbal, these offsets must be ACCUMULATED across frames to get
-  the marker's true offset from the original boresight:
-
-      x_abs += x_new      (running total, meters)
-      y_abs += y_new
-
-  Then:
-      yaw_deg   = atan2(x_abs, Z_FIXED)   -> absolute angle from start
-      pitch_deg = atan2(y_abs, Z_FIXED)
-
-Output is a DELTA angle: (target_angle - gimbal's current angle), i.e.
-how far to move the servo from where it already is, not an absolute
-angle to jump to.
-I’ll quickly re-check the current integration points so the explanation matches the files as they exist now, including any edits made after the previous change.
-
-Read 
-
-Read , lines 1 to 220
-
-Read 
-
-I changed the folder so the intended flow is:
-
-1. `gimbal_config.py`
-   - Loads camera calibration from `camera_calibration.npz`.
-   - Loads the measured screen distance from `z_distance.json`.
-   - Stores shared servo settings such as GPIO pins, limits, pulse widths, and offsets.
-
-2. `aruco_gimbal_picamera2.py`
-   - Detects the ArUco marker.
-   - Uses `solvePnP()` to calculate:
-     - `x`, `y`, `z` position
-     - marker rotation
-     - straight-line distance
-   - Intended to expose this through `detect_marker_pose()` so another script can call it.
-
-3. `servo.py`
-   - Imports the detector from `aruco_gimbal_picamera2.py`.
-   - Captures camera frames.
-   - Gets the marker coordinates.
-   - Sends `x` and `y` into `GimbalController.update()`.
-   - Converts the coordinates into pan and tilt angles.
-   - Converts angles into servo pulse widths.
-   - Uses the shared values from `gimbal_config.py` instead of duplicating servo constants.
-   - Prints the calculated angles and configured screen distance.
-
-The controller calculates angles approximately like this:
-
-```python
-yaw = atan2(x, screen_distance)
-pitch = atan2(y, screen_distance)
-```
-
-It also clamps the angles to the mechanical servo limits before driving the servos.
-
-However, I checked the current files and your later edits have reverted part of the integration. Currently, `servo.py` still imports:
-
-```python
-from aruco_gimbal_picamera2 import create_aruco_detector, detect_marker_pose
-```
-
-but the current `aruco_gimbal_picamera2.py` no longer contains those functions. Therefore, running `servo.py` will currently fail with an import error. The integration needs one more repair to restore those functions or change `servo.py` to match the current detector code.
-"""
 
 import math
 import time
 import socket
 import struct
 import cv2
-from picamera2 import Picamera2
+
+try:
+    from picamera2 import Picamera2
+except ImportError:  # pragma: no cover - only on non-Pi hosts
+    Picamera2 = None
 
 try:
     import pigpio
@@ -247,6 +170,12 @@ class SimulinkPoseStreamer:
 
 
 def main():
+    if Picamera2 is None:
+        raise RuntimeError(
+            "picamera2 is not installed on this machine. "
+            "The gimbal servo script requires a Raspberry Pi camera stack."
+        )
+
     picam2 = Picamera2()
     camera_config = picam2.create_video_configuration(
         main={"size": (640, 480), "format": "RGB888"}

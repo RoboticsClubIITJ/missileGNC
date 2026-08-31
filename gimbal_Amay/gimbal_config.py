@@ -24,12 +24,12 @@ import time
 import math
 import numpy as np
 
-#load files from env
+#load environment variables from .env file
 from dotenv import load_dotenv
 load_dotenv()
 
 SIMULINK_HOST = os.getenv("SIMULINK_HOST")
-SIMULINK_PORT = int(os.getenv("SIMULINK_PORT", 25000))
+SIMULINK_PORT = int(os.getenv("SIMULINK_PORT"))
 
 # ---------------------------------------------------------------
 # Camera intrinsics — loaded from calibration file

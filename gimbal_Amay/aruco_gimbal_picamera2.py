@@ -3,7 +3,12 @@ import numpy as np
 import math
 import os
 import time
-from picamera2 import Picamera2
+
+try:
+    from picamera2 import Picamera2
+except ImportError:  # pragma: no cover - only on non-Pi hosts
+    Picamera2 = None
+
 from gimbal_config import CAMERA_MATRIX, DIST_COEFFS, MARKER_SIZE
 
 # Force OpenCV to utilize all 4 Raspberry Pi CPU cores for operations
@@ -76,6 +81,12 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
 def main():
     ADAPTIVE_THRESH_WINDOWS = 1
     DETECTION_SCALE = 0.75
+
+    if Picamera2 is None:
+        raise RuntimeError(
+            "picamera2 is not installed on this machine. "
+            "This script requires a Raspberry Pi camera stack."
+        )
 
     if not hasattr(cv2, "aruco"):
         raise RuntimeError(
