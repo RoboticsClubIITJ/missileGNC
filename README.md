@@ -15,7 +15,8 @@ guidance algorithms such as Pure Pursuit, LOS Guidance, and Proportional Navigat
 
 
 # ArUco Marker → Raspberry Pi Camera → Python → UDP → MATLAB/Simulink
-1. pi_gimbal_udp_stream.py (detects the marker and sends X/Y)
+
+1) pi_gimbal_udp_stream.py (detects the marker and sends X/Y)
 
 This file runs on the Raspberry Pi.
 
@@ -27,7 +28,7 @@ what it does?
 4. Extracts the X and Y coordinates.
 5. Sends `[X, Y]` to the computer running Simulink using UDP.
 
-2. GimbalUDPReceiver.m (receives X/Y from the Raspberry Pi)
+2) GimbalUDPReceiver.m (receives X/Y from the Raspberry Pi)
 
 This file runs on the computer running MATLAB/Simulink.
 
@@ -40,7 +41,7 @@ what it does?
 3. Converts the received data into a signal that can be used inside Simulink.
 4. Holds the last received X and Y values if no new packet has arrived.
 
-3. build_gimbal_model.m (automatically creates a Simulink model to view and test the received X/Y data)
+3) build_gimbal_model.m (automatically creates a Simulink model to view and test the received X/Y data)
 
 This is a MATLAB script that automatically creates the Simulink model used for testing the UDP connection.
 
