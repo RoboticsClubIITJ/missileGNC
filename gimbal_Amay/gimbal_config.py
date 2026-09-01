@@ -24,12 +24,18 @@ import time
 import math
 import numpy as np
 
-#load environment variables from .env file
-from dotenv import load_dotenv
+# Load environment variables from .env if available.
+# If python-dotenv is not installed, continue with safe defaults.
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - optional dependency
+    def load_dotenv(*args, **kwargs):
+        return False
+
 load_dotenv()
 
-SIMULINK_HOST = os.getenv("SIMULINK_HOST")
-SIMULINK_PORT = int(os.getenv("SIMULINK_PORT"))
+SIMULINK_HOST = os.getenv("SIMULINK_HOST", "127.0.0.1")
+SIMULINK_PORT = int(os.getenv("SIMULINK_PORT", "25000"))
 
 # ---------------------------------------------------------------
 # Camera intrinsics — loaded from calibration file
@@ -207,8 +213,7 @@ PITCH_OFFSET_DEG = 0.0
 
 # Simulink UDP receiver settings. Set SIMULINK_HOST to the IP address of the
 # computer running anjaneya_V7.slx.
-SIMULINK_HOST = SIMULINK_HOST
-SIMULINK_PORT = SIMULINK_PORT
+# Defaults are safe for local testing when no .env file is present.
 
 
 if __name__ == "__main__":
