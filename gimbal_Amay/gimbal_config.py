@@ -178,7 +178,7 @@ if _cached_z is not None:
     SCREEN_DISTANCE_M = _cached_z
     print(f"Loaded cached Z distance: {SCREEN_DISTANCE_M:.4f} m (from {Z_CACHE_FILE})")
 else:
-    SCREEN_DISTANCE_M = 0.40  # placeholder until calibrated
+    SCREEN_DISTANCE_M = 1  # placeholder until calibrated
     print(
         f"No cached Z distance found. Using placeholder {SCREEN_DISTANCE_M} m — "
         f"run `python gimbal_config.py --calibrate` to measure the real value."
