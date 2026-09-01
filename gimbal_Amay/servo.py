@@ -49,8 +49,12 @@ def offset_to_angles(x_abs, y_abs):
     Accumulated camera-frame offset (x_abs, y_abs) meters, measured from
     the ORIGINAL boresight -> (yaw_deg, pitch_deg) absolute angle to
     point at it. z is fixed at Z_FIXED (known board distance).
+
+    The horizontal camera x-axis is inverted relative to the mechanical pan
+    servo direction on many gimbal builds, so the sign is flipped here to make
+    left/right alignment match the physical rig.
     """
-    yaw_deg = math.degrees(math.atan2(x_abs, Z_FIXED)) + YAW_OFFSET_DEG
+    yaw_deg = -math.degrees(math.atan2(x_abs, Z_FIXED)) + YAW_OFFSET_DEG
     pitch_deg = math.degrees(math.atan2(y_abs, Z_FIXED)) + PITCH_OFFSET_DEG
     return yaw_deg, pitch_deg
 
