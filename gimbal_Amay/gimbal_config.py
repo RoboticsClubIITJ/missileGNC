@@ -68,7 +68,7 @@ print(f"  fx={FX:.2f} fy={FY:.2f} cx={CX:.2f} cy={CY:.2f}")
 # ---------------------------------------------------------------
 # ArUco marker physical size (meters) — must match aruco_gimbal_picamera2.py
 # ---------------------------------------------------------------
-MARKER_SIZE = 0.05
+MARKER_SIZE = 0.099
 
 
 def _detect_marker_pose(gray, dictionary, parameters, legacy_api, marker_points):
