@@ -91,6 +91,10 @@ class GimbalController:
             if not self.pi.connected:
                 raise RuntimeError("Could not connect to pigpiod — run: sudo pigpiod")
 
+        # Start both servos at their center/neutral position so the rig begins
+        # in the mean mechanical pose instead of an arbitrary default.
+        self._drive(self._current_yaw, self._current_pitch)
+
     def update(self, x, y):
         """
         Feed marker_array's x, y for the CURRENT frame (offset relative to
