@@ -28,6 +28,9 @@ from gimbal_config import (
     YAW_OFFSET_DEG,
     PITCH_OFFSET_DEG,
     CONTROL_GAIN,
+    INTEGRAL_GAIN,
+    DERIVATIVE_GAIN,
+    INTEGRAL_LIMIT_DEG_S,
     ERROR_DEADBAND_DEG,
     MAX_STEP_DEG,
     ANGLE_FILTER_ALPHA,
@@ -84,6 +87,11 @@ class GimbalController:
         self._current_pitch = start_pitch
         self._filtered_yaw_error = 0.0
         self._filtered_pitch_error = 0.0
+        self._yaw_integral = 0.0
+        self._pitch_integral = 0.0
+        self._previous_yaw_error = 0.0
+        self._previous_pitch_error = 0.0
+        self._previous_update_time = time.perf_counter()
 
         self.pi = None
         if PIGPIO_AVAILABLE:
@@ -111,8 +119,28 @@ class GimbalController:
             + (1.0 - ANGLE_FILTER_ALPHA) * self._filtered_pitch_error
         )
 
-        correction_yaw = self._stable_correction(self._filtered_yaw_error)
-        correction_pitch = self._stable_correction(self._filtered_pitch_error)
+        now = time.perf_counter()
+        dt = max(1.0 / 120.0, min(now - self._previous_update_time, 0.2))
+        self._previous_update_time = now
+
+        correction_yaw = self._pid_correction(
+            self._filtered_yaw_error,
+            self._previous_yaw_error,
+            self._yaw_integral,
+            dt,
+        )
+        correction_pitch = self._pid_correction(
+            self._filtered_pitch_error,
+            self._previous_pitch_error,
+            self._pitch_integral,
+            dt,
+        )
+        self._yaw_integral = correction_yaw[1]
+        self._pitch_integral = correction_pitch[1]
+        self._previous_yaw_error = self._filtered_yaw_error
+        self._previous_pitch_error = self._filtered_pitch_error
+        correction_yaw = correction_yaw[0]
+        correction_pitch = correction_pitch[0]
 
         new_yaw = clamp(self._current_yaw + correction_yaw, PAN_LIMIT_DEG)
         new_pitch = clamp(self._current_pitch + correction_pitch, TILT_LIMIT_DEG)
@@ -129,11 +157,21 @@ class GimbalController:
         return delta_yaw, delta_pitch, self._current_yaw, self._current_pitch
 
     @staticmethod
-    def _stable_correction(error_deg):
+    def _pid_correction(error_deg, previous_error_deg, integral, dt):
         if abs(error_deg) <= ERROR_DEADBAND_DEG:
-            return 0.0
-        correction = CONTROL_GAIN * error_deg
-        return clamp(correction, (-MAX_STEP_DEG, MAX_STEP_DEG))
+            return 0.0, integral * 0.9
+
+        integral = clamp(
+            integral + error_deg * dt,
+            (-INTEGRAL_LIMIT_DEG_S, INTEGRAL_LIMIT_DEG_S),
+        )
+        derivative = (error_deg - previous_error_deg) / dt
+        correction = (
+            CONTROL_GAIN * error_deg
+            + INTEGRAL_GAIN * integral
+            + DERIVATIVE_GAIN * derivative
+        )
+        return clamp(correction, (-MAX_STEP_DEG, MAX_STEP_DEG)), integral
 
     def _drive(self, yaw_deg, pitch_deg):
         pan_us = angle_to_pulsewidth(yaw_deg, PAN_CENTER_US)

@@ -163,6 +163,9 @@ PAN_CENTER_US = 1500
 TILT_CENTER_US = 1500
 US_PER_DEGREE = 10.0
 CONTROL_GAIN = 0.75
+INTEGRAL_GAIN = 0.03
+DERIVATIVE_GAIN = 0.08
+INTEGRAL_LIMIT_DEG_S = 8.0
 ERROR_DEADBAND_DEG = 0.20
 MAX_STEP_DEG = 5.0
 ANGLE_FILTER_ALPHA = 0.60
@@ -256,10 +259,12 @@ servos continually overshoot the target.
 
 Because the correction is recalculated from the current camera-frame vector on
 every frame, it remains valid as the gimbal moves and the marker's `z` changes.
-The feedback tuning values above reduce vibration caused by pose noise:
+The feedback tuning values above use a filtered PID controller to reduce
+vibration caused by pose noise:
 `ANGLE_FILTER_ALPHA` smooths measurements, `CONTROL_GAIN` reduces the response,
-`ERROR_DEADBAND_DEG` suppresses tiny corrections, and `MAX_STEP_DEG` limits
-instantaneous movement.
+`INTEGRAL_GAIN` corrects small persistent error, `DERIVATIVE_GAIN` damps rapid
+changes, `INTEGRAL_LIMIT_DEG_S` prevents windup, `ERROR_DEADBAND_DEG` suppresses
+tiny corrections, and `MAX_STEP_DEG` limits instantaneous movement.
 
 ### Meaning of the controller outputs
 

@@ -206,7 +206,11 @@ US_PER_DEGREE = 8.0
 # Feedback tuning for fast tracking without uncontrolled jumps. Corrections
 # are filtered, reduced by CONTROL_GAIN, ignored inside the deadband, and
 # limited per camera frame.
+# PID gains operate on the filtered angular error in degrees.
 CONTROL_GAIN = 0.75
+INTEGRAL_GAIN = 0.03
+DERIVATIVE_GAIN = 0.08
+INTEGRAL_LIMIT_DEG_S = 8.0
 ERROR_DEADBAND_DEG = 0.20
 MAX_STEP_DEG = 5.0
 ANGLE_FILTER_ALPHA = 0.60
