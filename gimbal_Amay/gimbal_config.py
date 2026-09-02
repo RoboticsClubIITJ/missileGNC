@@ -74,7 +74,7 @@ print(f"  fx={FX:.2f} fy={FY:.2f} cx={CX:.2f} cy={CY:.2f}")
 # ---------------------------------------------------------------
 # ArUco marker physical size (meters) — must match aruco_gimbal_picamera2.py
 # ---------------------------------------------------------------
-MARKER_SIZE = 0.099
+MARKER_SIZE = 0.040
 
 
 def _detect_marker_pose(gray, dictionary, parameters, legacy_api, marker_points):
@@ -203,9 +203,23 @@ PAN_CENTER_US = 1500
 TILT_CENTER_US = 1500
 US_PER_DEGREE = 8.0
 
-# Conservative initial mechanical limits for safe testing.
-PAN_LIMIT_DEG = (-30.0, 30.0)
-TILT_LIMIT_DEG = (-20.0, 20.0)
+# Feedback tuning for stable tracking. Corrections are filtered, reduced by
+# CONTROL_GAIN, ignored inside the deadband, and limited per camera frame.
+CONTROL_GAIN = 0.35
+ERROR_DEADBAND_DEG = 0.35
+MAX_STEP_DEG = 1.5
+ANGLE_FILTER_ALPHA = 0.25
+
+# Detection performance controls. Lower DETECTION_SCALE is faster but makes
+# very small markers harder to detect; 0.75 is a balanced starting point.
+DETECTION_SCALE = 0.75
+CORNER_REFINE_ITERATIONS = 10
+CORNER_REFINE_EPSILON = 0.01
+
+# No software angle limits: the configured per-frame step limit still reduces
+# sudden motion, but the controller can follow targets across the full range.
+PAN_LIMIT_DEG = (-float("inf"), float("inf"))
+TILT_LIMIT_DEG = (-float("inf"), float("inf"))
 
 # Keep zero offsets at neutral until the physical axis direction is checked.
 YAW_OFFSET_DEG = 0.0

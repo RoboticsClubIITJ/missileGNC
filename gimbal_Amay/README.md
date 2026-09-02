@@ -147,7 +147,7 @@ Set `SIMULINK_HOST` to the IP address of the computer running MATLAB. The MATLAB
 The marker printed size is configured here:
 
 ```python
-MARKER_SIZE = 0.099
+MARKER_SIZE = 0.040
 ```
 
 This value is in meters and must match the actual printed marker edge length. An incorrect value produces an incorrect estimated distance and position.
@@ -162,11 +162,26 @@ TILT_GPIO = 19
 PAN_CENTER_US = 1500
 TILT_CENTER_US = 1500
 US_PER_DEGREE = 10.0
-PAN_LIMIT_DEG = (-90.0, 90.0)
-TILT_LIMIT_DEG = (-45.0, 45.0)
+CONTROL_GAIN = 0.35
+ERROR_DEADBAND_DEG = 0.35
+MAX_STEP_DEG = 1.5
+ANGLE_FILTER_ALPHA = 0.25
+# No software angle limits; MAX_STEP_DEG still limits movement per frame.
 YAW_OFFSET_DEG = 0.0
 PITCH_OFFSET_DEG = 0.0
 ```
+
+For detection speed, the shared configuration also provides:
+
+```python
+DETECTION_SCALE = 0.75
+CORNER_REFINE_ITERATIONS = 10
+CORNER_REFINE_EPSILON = 0.01
+```
+
+Lower `DETECTION_SCALE` can reduce response time, but a 40 mm marker may then
+become too small to detect reliably. Start at `0.75` and test `0.60` only if
+the marker remains clearly visible.
 
 Check the wiring and limits before attaching the mechanical load. A wrong GPIO or pulse range can move a servo unexpectedly.
 
@@ -189,7 +204,7 @@ The detector loads this file automatically through `gimbal_config.py`.
 ## Z Distance
 
 The servo controller uses the per-frame ArUco translation vector. It calculates
-the pan and tilt errors from `x/z` and `y/z`, so no fixed screen-distance
+pan from `x/z` and tilt from `y/sqrt(x^2 + z^2)`, so no fixed screen-distance
 calibration is required when the marker range changes.
 
 `gimbal_config.py --calibrate` remains available as an optional diagnostic for
@@ -233,12 +248,18 @@ horizontal_range = sqrt(x**2 + z**2)
 pitch_error = degrees(atan2(y, horizontal_range)) + PITCH_OFFSET_DEG
 ```
 
-The controller applies these errors to the current servo angles, clamps the
-result to the configured mechanical limits, and converts the angle to a PWM
-pulse width.
+The controller filters these errors, applies a proportional correction, uses
+a small deadband to prevent servo chatter, limits the maximum step per frame,
+then clamps the result to the configured mechanical limits and converts the
+angle to a PWM pulse width. This prevents noisy pose estimates from making the
+servos continually overshoot the target.
 
 Because the correction is recalculated from the current camera-frame vector on
 every frame, it remains valid as the gimbal moves and the marker's `z` changes.
+The feedback tuning values above reduce vibration caused by pose noise:
+`ANGLE_FILTER_ALPHA` smooths measurements, `CONTROL_GAIN` reduces the response,
+`ERROR_DEADBAND_DEG` suppresses tiny corrections, and `MAX_STEP_DEG` limits
+instantaneous movement.
 
 ### Meaning of the controller outputs
 

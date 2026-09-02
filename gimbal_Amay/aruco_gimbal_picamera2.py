@@ -9,7 +9,14 @@ try:
 except ImportError:  # pragma: no cover - only on non-Pi hosts
     Picamera2 = None
 
-from gimbal_config import CAMERA_MATRIX, DIST_COEFFS, MARKER_SIZE
+from gimbal_config import (
+    CAMERA_MATRIX,
+    DIST_COEFFS,
+    MARKER_SIZE,
+    DETECTION_SCALE,
+    CORNER_REFINE_ITERATIONS,
+    CORNER_REFINE_EPSILON,
+)
 
 # Force OpenCV to utilize all 4 Raspberry Pi CPU cores for operations
 cv2.setNumThreads(4)
@@ -50,7 +57,7 @@ def detect_markers(gray, detector, dictionary, parameters, legacy_api):
 
 
 def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
-                       detection_scale=0.75):
+                       detection_scale=DETECTION_SCALE):
     """Detect the first marker and return [x, y, z, pitch, yaw, distance]."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     detection_gray = cv2.resize(
@@ -63,7 +70,11 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
     if ids is None or len(ids) == 0:
         return None, corners, ids
     corners = [corner / detection_scale for corner in corners]
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    criteria = (
+        cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
+        CORNER_REFINE_ITERATIONS,
+        CORNER_REFINE_EPSILON,
+    )
     corners = [cv2.cornerSubPix(gray, corner.astype(np.float32), (5, 5), (-1, -1), criteria)
                for corner in corners]
     success, rvec, tvec = cv2.solvePnP(
@@ -80,7 +91,6 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
 
 def main():
     ADAPTIVE_THRESH_WINDOWS = 1
-    DETECTION_SCALE = 0.75
 
     if Picamera2 is None:
         raise RuntimeError(
@@ -209,8 +219,8 @@ def main():
                 corners = [corner / DETECTION_SCALE for corner in corners]
                 refinement_criteria = (
                     cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
-                    30,
-                    0.001,
+                    CORNER_REFINE_ITERATIONS,
+                    CORNER_REFINE_EPSILON,
                 )
                 corners = [
                     cv2.cornerSubPix(

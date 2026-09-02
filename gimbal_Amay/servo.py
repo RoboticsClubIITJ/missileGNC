@@ -27,6 +27,14 @@ from gimbal_config import (
     TILT_LIMIT_DEG,
     YAW_OFFSET_DEG,
     PITCH_OFFSET_DEG,
+    CONTROL_GAIN,
+    ERROR_DEADBAND_DEG,
+    MAX_STEP_DEG,
+    ANGLE_FILTER_ALPHA,
+    FX,
+    FY,
+    CX,
+    CY,
     SIMULINK_HOST,
     SIMULINK_PORT,
 )
@@ -74,6 +82,8 @@ class GimbalController:
         # Actual current physical angle of the gimbal (not a target/setpoint).
         self._current_yaw = start_yaw
         self._current_pitch = start_pitch
+        self._filtered_yaw_error = 0.0
+        self._filtered_pitch_error = 0.0
 
         self.pi = None
         if PIGPIO_AVAILABLE:
@@ -91,7 +101,18 @@ class GimbalController:
         converted to an angular error using its live z value, then applied
         incrementally to the current servo angles.
         """
-        correction_yaw, correction_pitch = offset_to_angles(x, y, z)
+        yaw_error, pitch_error = offset_to_angles(x, y, z)
+        self._filtered_yaw_error = (
+            ANGLE_FILTER_ALPHA * yaw_error
+            + (1.0 - ANGLE_FILTER_ALPHA) * self._filtered_yaw_error
+        )
+        self._filtered_pitch_error = (
+            ANGLE_FILTER_ALPHA * pitch_error
+            + (1.0 - ANGLE_FILTER_ALPHA) * self._filtered_pitch_error
+        )
+
+        correction_yaw = self._stable_correction(self._filtered_yaw_error)
+        correction_pitch = self._stable_correction(self._filtered_pitch_error)
 
         new_yaw = clamp(self._current_yaw + correction_yaw, PAN_LIMIT_DEG)
         new_pitch = clamp(self._current_pitch + correction_pitch, TILT_LIMIT_DEG)
@@ -106,6 +127,13 @@ class GimbalController:
 
         self._drive(self._current_yaw, self._current_pitch)
         return delta_yaw, delta_pitch, self._current_yaw, self._current_pitch
+
+    @staticmethod
+    def _stable_correction(error_deg):
+        if abs(error_deg) <= ERROR_DEADBAND_DEG:
+            return 0.0
+        correction = CONTROL_GAIN * error_deg
+        return clamp(correction, (-MAX_STEP_DEG, MAX_STEP_DEG))
 
     def _drive(self, yaw_deg, pitch_deg):
         pan_us = angle_to_pulsewidth(yaw_deg, PAN_CENTER_US)
@@ -132,6 +160,70 @@ def process_marker(marker_array, gimbal):
         marker_array[0], marker_array[1], marker_array[2]
     )
     return delta_yaw, delta_pitch, yaw, pitch, marker_array[5]
+
+
+def draw_target_hud(frame, marker_array, servo_result, response_ms, fps):
+    """Draw a readable targeting HUD over the live camera frame."""
+    height, width = frame.shape[:2]
+    center_x, center_y = width // 2, height // 2
+    accent = (70, 220, 90)
+    warning = (40, 180, 255)
+    white = (235, 245, 245)
+    panel = (18, 27, 29)
+
+    # Center reticle shows the camera boresight even when no marker is visible.
+    cv2.line(frame, (center_x - 28, center_y), (center_x - 8, center_y), accent, 1)
+    cv2.line(frame, (center_x + 8, center_y), (center_x + 28, center_y), accent, 1)
+    cv2.line(frame, (center_x, center_y - 28), (center_x, center_y - 8), accent, 1)
+    cv2.line(frame, (center_x, center_y + 8), (center_x, center_y + 28), accent, 1)
+    cv2.circle(frame, (center_x, center_y), 4, accent, 1)
+
+    if marker_array is not None:
+        # The marker center is projected from its pose, so the lock indicator
+        # remains useful even when the marker is not exactly at image center.
+        marker_x = int(round(CX + FX * marker_array[0] / marker_array[2]))
+        marker_y = int(round(CY + FY * marker_array[1] / marker_array[2]))
+        marker_x = max(0, min(width - 1, marker_x))
+        marker_y = max(0, min(height - 1, marker_y))
+        bracket = 22
+        cv2.line(frame, (marker_x - bracket, marker_y - bracket),
+                 (marker_x - 8, marker_y - bracket), accent, 2)
+        cv2.line(frame, (marker_x + 8, marker_y - bracket),
+                 (marker_x + bracket, marker_y - bracket), accent, 2)
+        cv2.line(frame, (marker_x - bracket, marker_y + bracket),
+                 (marker_x - bracket, marker_y + 8), accent, 2)
+        cv2.line(frame, (marker_x + bracket, marker_y + bracket),
+                 (marker_x + bracket, marker_y + 8), accent, 2)
+        cv2.putText(frame, "TARGET LOCKED", (marker_x + 28, marker_y - 28),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.55, accent, 1, cv2.LINE_AA)
+        cv2.line(frame, (center_x, center_y), (marker_x, marker_y), accent, 1)
+    else:
+        cv2.putText(frame, "SEARCHING FOR TARGET", (20, 38),
+                    cv2.FONT_HERSHEY_DUPLEX, 0.62, warning, 1, cv2.LINE_AA)
+
+    # Compact telemetry panel keeps the image visible while making timing
+    # and targeting state immediately apparent during hardware testing.
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (14, 14), (260, 126), panel, -1)
+    cv2.addWeighted(overlay, 0.78, frame, 0.22, 0, frame)
+    cv2.putText(frame, "GIMBAL // TRACKING", (26, 38),
+                cv2.FONT_HERSHEY_DUPLEX, 0.55, white, 1, cv2.LINE_AA)
+    cv2.putText(frame, f"STATUS  {'LOCKED' if marker_array is not None else 'SEARCHING'}",
+                (26, 63), cv2.FONT_HERSHEY_SIMPLEX, 0.48,
+                accent if marker_array is not None else warning, 1, cv2.LINE_AA)
+    cv2.putText(frame, f"RESPONSE {response_ms:6.1f} ms", (26, 86),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, white, 1, cv2.LINE_AA)
+    cv2.putText(frame, f"FPS      {fps:6.1f}", (26, 108),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.48, white, 1, cv2.LINE_AA)
+
+    if marker_array is not None and servo_result is not None:
+        _, _, yaw, pitch, distance = servo_result
+        cv2.putText(frame, f"RANGE {distance:.2f}m  PAN {yaw:+.1f}  TILT {pitch:+.1f}",
+                    (18, height - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.48,
+                    white, 1, cv2.LINE_AA)
+    else:
+        cv2.putText(frame, "Q  EXIT", (18, height - 18),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.48, white, 1, cv2.LINE_AA)
 
 
 class SimulinkPoseStreamer:
@@ -176,12 +268,16 @@ def main():
 
     try:
         while True:
+            frame_start = time.perf_counter()
             frame = picam2.capture_array()
             marker_array, corners, ids = detect_marker_pose(
                 frame, detector, dictionary, parameters, legacy_api
             )
             simulink.send(marker_array)
             servo_result = process_marker(marker_array, gimbal)
+
+            response_ms = (time.perf_counter() - frame_start) * 1000.0
+            fps = 1000.0 / response_ms if response_ms > 0 else 0.0
 
             if servo_result is not None:
                 delta_yaw, delta_pitch, yaw, pitch, distance = servo_result
@@ -194,6 +290,7 @@ def main():
 
             if ids is not None:
                 cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+            draw_target_hud(frame, marker_array, servo_result, response_ms, fps)
             cv2.imshow("Gimbal servo control", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
