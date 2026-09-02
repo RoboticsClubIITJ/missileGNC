@@ -162,10 +162,10 @@ TILT_GPIO = 19
 PAN_CENTER_US = 1500
 TILT_CENTER_US = 1500
 US_PER_DEGREE = 10.0
-CONTROL_GAIN = 0.35
-ERROR_DEADBAND_DEG = 0.35
-MAX_STEP_DEG = 1.5
-ANGLE_FILTER_ALPHA = 0.25
+CONTROL_GAIN = 0.75
+ERROR_DEADBAND_DEG = 0.20
+MAX_STEP_DEG = 5.0
+ANGLE_FILTER_ALPHA = 0.60
 # No software angle limits; MAX_STEP_DEG still limits movement per frame.
 YAW_OFFSET_DEG = 0.0
 PITCH_OFFSET_DEG = 0.0
@@ -179,7 +179,7 @@ CORNER_REFINE_ITERATIONS = 10
 CORNER_REFINE_EPSILON = 0.01
 ```
 
-Lower `DETECTION_SCALE` can reduce response time, but a 40 mm marker may then
+Lower `DETECTION_SCALE` can reduce response time, but a 100 mm marker may then
 become too small to detect reliably. Start at `0.75` and test `0.60` only if
 the marker remains clearly visible.
 

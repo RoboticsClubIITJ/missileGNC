@@ -203,12 +203,13 @@ PAN_CENTER_US = 1500
 TILT_CENTER_US = 1500
 US_PER_DEGREE = 8.0
 
-# Feedback tuning for stable tracking. Corrections are filtered, reduced by
-# CONTROL_GAIN, ignored inside the deadband, and limited per camera frame.
-CONTROL_GAIN = 0.35
-ERROR_DEADBAND_DEG = 0.35
-MAX_STEP_DEG = 1.5
-ANGLE_FILTER_ALPHA = 0.25
+# Feedback tuning for fast tracking without uncontrolled jumps. Corrections
+# are filtered, reduced by CONTROL_GAIN, ignored inside the deadband, and
+# limited per camera frame.
+CONTROL_GAIN = 0.75
+ERROR_DEADBAND_DEG = 0.20
+MAX_STEP_DEG = 5.0
+ANGLE_FILTER_ALPHA = 0.60
 
 # Detection performance controls. Lower DETECTION_SCALE is faster but makes
 # very small markers harder to detect; 0.75 is a balanced starting point.
