@@ -216,8 +216,8 @@ MAX_STEP_DEG = 5.0
 ANGLE_FILTER_ALPHA = 0.60
 
 # Detection performance controls. Lower DETECTION_SCALE is faster but makes
-# very small markers harder to detect; 0.75 is a balanced starting point.
-DETECTION_SCALE = 0.75
+# very small markers harder to detect; 0.60 is a fast balanced setting.
+DETECTION_SCALE = 0.60
 CORNER_REFINE_ITERATIONS = 10
 CORNER_REFINE_EPSILON = 0.01
 

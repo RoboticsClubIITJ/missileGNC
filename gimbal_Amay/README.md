@@ -177,14 +177,14 @@ PITCH_OFFSET_DEG = 0.0
 For detection speed, the shared configuration also provides:
 
 ```python
-DETECTION_SCALE = 0.75
+DETECTION_SCALE = 0.60
 CORNER_REFINE_ITERATIONS = 10
 CORNER_REFINE_EPSILON = 0.01
 ```
 
 Lower `DETECTION_SCALE` can reduce response time, but a 100 mm marker may then
-become too small to detect reliably. Start at `0.75` and test `0.60` only if
-the marker remains clearly visible.
+become too small to detect reliably. The runtime starts at `0.60`; test `0.50`
+only if the marker remains clearly visible at its farthest operating distance.
 
 Check the wiring and limits before attaching the mechanical load. A wrong GPIO or pulse range can move a servo unexpectedly.
 
