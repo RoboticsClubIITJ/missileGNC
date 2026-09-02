@@ -17,10 +17,6 @@ try:
 except ImportError:
     PIGPIO_AVAILABLE = False
 
-# Fixed camera-to-screen/board distance (meters). The z coordinate from
-# ArUco pose estimation is noisy/unreliable at this range, so it is NOT
-# used for the angle math — only x and y (position on the 2D board) matter.
-# Replace this import with wherever you actually define/measure it.
 from gimbal_config import (
     PAN_GPIO,
     TILT_GPIO,
@@ -31,7 +27,6 @@ from gimbal_config import (
     TILT_LIMIT_DEG,
     YAW_OFFSET_DEG,
     PITCH_OFFSET_DEG,
-    SCREEN_DISTANCE_M as Z_FIXED,
     SIMULINK_HOST,
     SIMULINK_PORT,
 )
@@ -44,18 +39,22 @@ from aruco_gimbal_picamera2 import create_aruco_detector, detect_marker_pose
 # Servo and geometry values are loaded from gimbal_config.py above.
 
 
-def offset_to_angles(x_abs, y_abs):
+def offset_to_angles(x, y, z):
     """
-    Accumulated camera-frame offset (x_abs, y_abs) meters, measured from
-    the ORIGINAL boresight -> (yaw_deg, pitch_deg) absolute angle to
-    point at it. z is fixed at Z_FIXED (known board distance).
+    Convert the current camera-frame marker vector into pan/tilt correction
+    angles. x, y, and z are the per-frame ArUco translation in meters. Pan is
+    measured in the horizontal x-z plane; tilt is measured from that plane.
 
     The horizontal camera x-axis is inverted relative to the mechanical pan
     servo direction on many gimbal builds, so the sign is flipped here to make
     left/right alignment match the physical rig.
     """
-    yaw_deg = -math.degrees(math.atan2(x_abs, Z_FIXED)) + YAW_OFFSET_DEG
-    pitch_deg = math.degrees(math.atan2(y_abs, Z_FIXED)) + PITCH_OFFSET_DEG
+    if z <= 0:
+        raise ValueError(f"Marker must be in front of the camera; received z={z:.4f}m")
+
+    horizontal_range = math.hypot(x, z)
+    yaw_deg = -math.degrees(math.atan2(x, z)) + YAW_OFFSET_DEG
+    pitch_deg = math.degrees(math.atan2(y, horizontal_range)) + PITCH_OFFSET_DEG
     return yaw_deg, pitch_deg
 
 
@@ -69,22 +68,9 @@ def angle_to_pulsewidth(angle_deg, center_us):
 
 
 class GimbalController:
-    """
-    pigpio servo driver with clamping. Accumulates each frame's camera-
-    relative (x, y) offset into an absolute offset from the original
-    boresight (since the camera moves with the gimbal), converts that to
-    an absolute target angle, and moves the gimbal by the DELTA from its
-    previous angle (target - prev_angle) rather than jumping to an
-    absolute angle each frame.
-    """
+    """Drive the gimbal from the marker's current 3D camera-frame vector."""
 
     def __init__(self, start_yaw=0.0, start_pitch=0.0):
-        # Running total offset of the marker from the ORIGINAL boresight,
-        # in meters at the Z_FIXED plane. t=0: marker is at (x0, y0) -> this
-        # starts at 0 and accumulates as the gimbal (and camera) moves.
-        self._accum_x = 0.0
-        self._accum_y = 0.0
-
         # Actual current physical angle of the gimbal (not a target/setpoint).
         self._current_yaw = start_yaw
         self._current_pitch = start_pitch
@@ -99,24 +85,16 @@ class GimbalController:
         # in the mean mechanical pose instead of an arbitrary default.
         self._drive(self._current_yaw, self._current_pitch)
 
-    def update(self, x, y):
+    def update(self, x, y, z):
         """
-        Feed marker_array's x, y for the CURRENT frame (offset relative to
-        wherever the camera is pointed right now — z is fixed, see Z_FIXED).
-        Accumulates it into the absolute offset, computes the absolute
-        target angle, moves the gimbal by (target - prev_angle), drives
-        servos, and returns (delta_yaw, delta_pitch, new_yaw, new_pitch).
+        Feed the current frame's marker vector in meters. The vector is
+        converted to an angular error using its live z value, then applied
+        incrementally to the current servo angles.
         """
-        self._accum_x += x
-        self._accum_y += y
+        correction_yaw, correction_pitch = offset_to_angles(x, y, z)
 
-        target_yaw, target_pitch = offset_to_angles(self._accum_x, self._accum_y)
-
-        delta_yaw = target_yaw - self._current_yaw
-        delta_pitch = target_pitch - self._current_pitch
-
-        new_yaw = clamp(self._current_yaw + delta_yaw, PAN_LIMIT_DEG)
-        new_pitch = clamp(self._current_pitch + delta_pitch, TILT_LIMIT_DEG)
+        new_yaw = clamp(self._current_yaw + correction_yaw, PAN_LIMIT_DEG)
+        new_pitch = clamp(self._current_pitch + correction_pitch, TILT_LIMIT_DEG)
 
         # Re-derive delta after clamping, so we never command more motion
         # than the servo can actually take.
@@ -147,13 +125,13 @@ class GimbalController:
 
 
 def process_marker(marker_array, gimbal):
-    """Process one detection and return servo angles plus configured distance."""
+    """Process one detection and return servo angles plus measured distance."""
     if marker_array is None:
         return None
     delta_yaw, delta_pitch, yaw, pitch = gimbal.update(
-        marker_array[0], marker_array[1]
+        marker_array[0], marker_array[1], marker_array[2]
     )
-    return delta_yaw, delta_pitch, yaw, pitch, Z_FIXED
+    return delta_yaw, delta_pitch, yaw, pitch, marker_array[5]
 
 
 class SimulinkPoseStreamer:
@@ -211,7 +189,7 @@ def main():
                     f"x={marker_array[0]:+.3f}m y={marker_array[1]:+.3f}m | "
                     f"delta yaw={delta_yaw:+.2f} deg, delta pitch={delta_pitch:+.2f} deg | "
                     f"yaw={yaw:+.2f} deg, pitch={pitch:+.2f} deg | "
-                    f"screen distance={distance:.3f}m"
+                    f"marker distance={distance:.3f}m"
                 )
 
             if ids is not None:

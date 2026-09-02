@@ -31,13 +31,12 @@ Complete these steps in this order:
 
 1. Measure the physical ArUco marker edge and set `MARKER_SIZE` in `gimbal_config.py`.
 2. Run camera calibration and confirm that `camera_calibration.npz` is saved in this folder.
-3. Run screen-distance calibration and confirm that `z_distance.json` is saved in this folder.
-4. Find the MATLAB computer's IP address and set `SIMULINK_HOST` in `gimbal_config.py`.
-5. Put `GimbalUDPReceiver.m` on the MATLAB path.
-6. Test the UDP link with `build_udp_monitor_model.m`.
-7. Add the receiver and Demux blocks to `anjaneya_V7.slx`.
-8. Verify signal units and coordinate signs with Scopes.
-9. Start the full guidance model only after the measurement signals look correct.
+3. Find the MATLAB computer's IP address and set `SIMULINK_HOST` in `gimbal_config.py`.
+4. Put `GimbalUDPReceiver.m` on the MATLAB path.
+5. Test the UDP link with `build_udp_monitor_model.m`.
+6. Add the receiver and Demux blocks to `anjaneya_V7.slx`.
+7. Verify signal units and coordinate signs with Scopes.
+8. Start the full guidance model only after the measurement signals look correct.
 
 Do not start with the servos attached to the full mechanical assembly. First test camera detection and UDP reception, then test servo movement with safe mechanical limits.
 
@@ -45,7 +44,7 @@ Do not start with the servos attached to the full mechanical assembly. First tes
 
 - `servo.py`: Main runtime program. Reads camera frames, calls the ArUco detector, calculates servo angles, drives the servos, and sends UDP packets.
 - `aruco_gimbal_picamera2.py`: Reusable camera and ArUco detection functions. The important public functions are `create_aruco_detector()` and `detect_marker_pose()`.
-- `gimbal_config.py`: Shared camera calibration, marker size, screen distance, servo settings, and Simulink network settings.
+- `gimbal_config.py`: Shared camera calibration, marker size, optional distance diagnostics, servo settings, and Simulink network settings.
 - `calibrate_camera_picamera2.py`: Captures ChArUco calibration images and creates `camera_calibration.npz`.
 - `camera_calibration.npz`: Camera intrinsic calibration file used by the detector.
 - `GimbalUDPReceiver.m`: MATLAB System object that receives the UDP pose packets.
@@ -148,7 +147,7 @@ Set `SIMULINK_HOST` to the IP address of the computer running MATLAB. The MATLAB
 The marker printed size is configured here:
 
 ```python
-MARKER_SIZE = 0.05
+MARKER_SIZE = 0.099
 ```
 
 This value is in meters and must match the actual printed marker edge length. An incorrect value produces an incorrect estimated distance and position.
@@ -187,17 +186,15 @@ camera_calibration.npz
 
 The detector loads this file automatically through `gimbal_config.py`.
 
-## Screen Distance Calibration
+## Z Distance
 
-The servo angle calculation uses a fixed camera-to-screen distance instead of the per-frame ArUco `z` value.
+The servo controller uses the per-frame ArUco translation vector. It calculates
+the pan and tilt errors from `x/z` and `y/z`, so no fixed screen-distance
+calibration is required when the marker range changes.
 
-Place the marker at the center of the screen or board and run:
-
-```bash
-python3 gimbal_config.py --calibrate
-```
-
-This saves the measured value in `z_distance.json`. If the file does not exist, the code uses the placeholder value `0.40` meters. For accurate pointing, perform this calibration first.
+`gimbal_config.py --calibrate` remains available as an optional diagnostic for
+measuring a representative distance, but its cached value is not used by
+`servo.py`.
 
 ## Running the Pi Program
 
@@ -214,7 +211,7 @@ python3 servo.py
 The program displays the camera image and prints values similar to:
 
 ```text
-x=+0.020m y=-0.010m | delta yaw=+2.86 deg, delta pitch=-1.43 deg | yaw=+2.86 deg, pitch=-1.43 deg | screen distance=0.400m
+x=+0.020m y=-0.010m | delta yaw=+2.86 deg, delta pitch=-1.43 deg | yaw=+2.86 deg, pitch=-1.43 deg | marker distance=0.400m
 ```
 
 Press `q` in the camera window to stop. The program releases the servo outputs, closes the UDP socket, stops the camera, and closes the display window.
@@ -227,20 +224,25 @@ The detector returns marker coordinates in the camera coordinate system:
 - `y`: vertical offset in meters; positive is camera-down
 - `z`: forward distance in meters
 
-`servo.py` uses the configured fixed screen distance:
+`servo.py` uses the full marker vector. Pan is calculated in the horizontal
+plane, while tilt uses the horizontal range `sqrt(x^2 + z^2)`:
 
 ```python
-yaw = degrees(atan2(x, SCREEN_DISTANCE_M)) + YAW_OFFSET_DEG
-pitch = degrees(atan2(y, SCREEN_DISTANCE_M)) + PITCH_OFFSET_DEG
+yaw_error = -degrees(atan2(x, z)) + YAW_OFFSET_DEG
+horizontal_range = sqrt(x**2 + z**2)
+pitch_error = degrees(atan2(y, horizontal_range)) + PITCH_OFFSET_DEG
 ```
 
-The controller keeps the current servo angle, calculates the required change, clamps the result to the configured mechanical limits, and converts the angle to a PWM pulse width.
+The controller applies these errors to the current servo angles, clamps the
+result to the configured mechanical limits, and converts the angle to a PWM
+pulse width.
 
-The current controller accumulates the detected `x` and `y` offsets over frames. This assumes each new detection is a camera-relative correction produced after the gimbal moves. If the target is stationary and the camera is not moving with the gimbal, this accumulation behavior should be changed before use.
+Because the correction is recalculated from the current camera-frame vector on
+every frame, it remains valid as the gimbal moves and the marker's `z` changes.
 
 ### Meaning of the controller outputs
 
-`GimbalController.update(x, y)` returns four values:
+`GimbalController.update(x, y, z)` returns four values:
 
 ```text
 delta_yaw, delta_pitch, current_yaw, current_pitch

@@ -2,9 +2,9 @@
 gimbal_config.py
 
 Central config for the gimbal rig: loads the camera intrinsics produced
-by calibrate_camera_picamera2.py (camera_calibration.npz), and measures
-the fixed camera-to-board distance (Z) by running a short live ArUco
-detection with the marker placed dead-center in the camera's view.
+by calibrate_camera_picamera2.py (camera_calibration.npz). The runtime
+controller uses the per-frame ArUco z coordinate; the optional distance
+calibration below is retained for diagnostics and compatibility.
 
 Z-distance calibration workflow:
     1. Place the ArUco marker at the center of the board, directly in
@@ -12,8 +12,8 @@ Z-distance calibration workflow:
     2. Run:  python gimbal_config.py --calibrate
        This detects the marker for a few seconds, averages its z, and
        saves it to z_distance.json.
-    3. On every subsequent import, SCREEN_DISTANCE_M is loaded straight
-       from that cached file — no camera needed at runtime.
+        3. The cached value is available for diagnostics; servo.py does not
+             use it for runtime angle calculations.
 
 Keep this file in the same folder as camera_calibration.npz.
 """
@@ -176,8 +176,8 @@ def _load_cached_z():
 
 
 # ---------------------------------------------------------------
-# Fixed camera-to-board distance (meters), used as Z_FIXED in
-# aruco_gimbal_control.py instead of the (noisy) per-frame ArUco z.
+# Optional representative distance retained for diagnostics and compatibility.
+# servo.py uses the per-frame ArUco z value instead.
 # ---------------------------------------------------------------
 _cached_z = _load_cached_z()
 if _cached_z is not None:
