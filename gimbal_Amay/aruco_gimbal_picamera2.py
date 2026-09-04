@@ -128,7 +128,7 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
 
     success, rvec, tvec = cv2.solvePnP(
         marker_object_points(), corners[marker_index][0], CAMERA_MATRIX, DIST_COEFFS,
-        flags=cv2.SOLVEPNP_IPPE_SQUARE
+        flags=cv2.SOLVEPNP_ITERATIVE
     )
     if not success:
         return (None, None, corners, ids) if return_rotation else (None, corners, ids)
