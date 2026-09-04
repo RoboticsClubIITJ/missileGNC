@@ -87,7 +87,8 @@ def detect_marker_center(frame, detector, dictionary, parameters, legacy_api, ma
 
 
 def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
-                       detection_scale=DETECTION_SCALE, excluded_marker_id=None):
+                       detection_scale=DETECTION_SCALE, excluded_marker_id=None,
+                       required_marker_id=None):
     """Detect the first marker and return [x, y, z, pitch, yaw, distance]."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     detection_gray = cv2.resize(
@@ -108,6 +109,14 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
     corners = [cv2.cornerSubPix(gray, corner.astype(np.float32), (5, 5), (-1, -1), criteria)
                for corner in corners]
     marker_index = 0
+    if required_marker_id is not None:
+        matching_indices = [
+            index for index, detected_id in enumerate(ids.flatten())
+            if int(detected_id) == required_marker_id
+        ]
+        if not matching_indices:
+            return None, corners, ids
+        marker_index = matching_indices[0]
     if excluded_marker_id is not None:
         matching_indices = [
             index for index, detected_id in enumerate(ids.flatten())

@@ -4,6 +4,8 @@ import math
 import time
 import socket
 import struct
+import csv
+import os
 import cv2
 
 try:
@@ -277,7 +279,7 @@ def process_marker(marker_array, gimbal, origin_angles):
     return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[5]
 
 
-def pose_relative_to_origin(marker_array, origin_angles):
+def pose_relative_to_origin(marker_array, origin_angles, origin_pose):
     """Express a target pose as a metric vector in the latched origin frame."""
     if marker_array is None:
         return None
@@ -294,9 +296,9 @@ def pose_relative_to_origin(marker_array, origin_angles):
     y = distance * math.sin(relative_pitch)
     z = horizontal_distance * math.cos(relative_yaw)
     return [
-        float(x),
-        float(y),
-        float(z),
+        float(x - origin_pose[0]),
+        float(y - origin_pose[1]),
+        float(z - origin_pose[2]),
         marker_array[3],
         math.degrees(relative_yaw),
         float(distance),
@@ -419,6 +421,17 @@ def main():
     detector, dictionary, parameters, legacy_api = create_aruco_detector()
     gimbal = GimbalController()
     simulink = SimulinkPoseStreamer()
+    origin_pose = None
+    coordinates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coordinates.csv")
+    coordinates_file = open(coordinates_path, "a", newline="")
+    coordinates_writer = csv.writer(coordinates_file)
+    if os.path.getsize(coordinates_path) == 0:
+        coordinates_writer.writerow([
+            "timestamp", "raw_x_m", "raw_y_m", "raw_z_m",
+            "relative_x_m", "relative_y_m", "relative_z_m",
+            "relative_yaw_deg", "relative_pitch_deg",
+        ])
+        coordinates_file.flush()
     origin_locked = False
     origin_angles = gimbal.current_angles
     search_yaw_direction = 1.0
@@ -453,17 +466,28 @@ def main():
                         abs(pixel_error_x) <= ORIGIN_CENTER_TOLERANCE_PX
                         and abs(pixel_error_y) <= ORIGIN_CENTER_TOLERANCE_PX
                     ):
-                        origin_locked = True
-                        origin_angles = gimbal.current_angles
-                        gimbal.reset_control_state()
-                        marker_array = None
-                        servo_result = None
-                        status = "ORIGIN LOCKED"
-                        print(
-                            f"Origin locked on marker ID {ORIGIN_MARKER_ID}: "
-                            f"yaw={origin_angles[0]:+.2f} deg, "
-                            f"pitch={origin_angles[1]:+.2f} deg"
+                        origin_pose, _, _ = detect_marker_pose(
+                            frame, detector, dictionary, parameters, legacy_api,
+                            required_marker_id=ORIGIN_MARKER_ID,
                         )
+                        if origin_pose is not None:
+                            origin_locked = True
+                            origin_angles = gimbal.current_angles
+                            gimbal.reset_control_state()
+                            marker_array = None
+                            servo_result = None
+                            status = "ORIGIN LOCKED"
+                            print(
+                                f"Origin locked on marker ID {ORIGIN_MARKER_ID}: "
+                                f"x={origin_pose[0]:+.3f}m, y={origin_pose[1]:+.3f}m, "
+                                f"z={origin_pose[2]:+.3f}m, "
+                                f"yaw={origin_angles[0]:+.2f} deg, "
+                                f"pitch={origin_angles[1]:+.2f} deg"
+                            )
+                        else:
+                            marker_array = None
+                            servo_result = None
+                            status = "ORIGIN POSE UNAVAILABLE"
                     else:
                         yaw_error = -math.degrees(math.atan2(pixel_error_x, FX))
                         pitch_error = math.degrees(math.atan2(pixel_error_y, FY))
@@ -477,8 +501,21 @@ def main():
                     excluded_marker_id=ORIGIN_MARKER_ID,
                 )
                 packet_interval_ms, cumulative_average_ms = simulink.send(
-                    pose_relative_to_origin(marker_array, origin_angles)
+                    pose_relative_to_origin(marker_array, origin_angles, origin_pose)
                 )
+                if marker_array is not None:
+                    relative_pose = pose_relative_to_origin(
+                        marker_array, origin_angles, origin_pose
+                    )
+                    coordinates_writer.writerow([
+                        f"{time.time():.6f}",
+                        f"{marker_array[0]:.6f}", f"{marker_array[1]:.6f}",
+                        f"{marker_array[2]:.6f}",
+                        f"{relative_pose[0]:.6f}", f"{relative_pose[1]:.6f}",
+                        f"{relative_pose[2]:.6f}",
+                        f"{relative_pose[4]:.6f}", f"{marker_array[3]:.6f}",
+                    ])
+                    coordinates_file.flush()
                 servo_result = process_marker(marker_array, gimbal, origin_angles)
                 status = "TRACKING"
 
@@ -509,6 +546,7 @@ def main():
     finally:
         gimbal.stop()
         simulink.close()
+        coordinates_file.close()
         picam2.stop()
         cv2.destroyAllWindows()
 
