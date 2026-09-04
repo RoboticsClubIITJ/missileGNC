@@ -154,7 +154,7 @@ Set `SIMULINK_HOST` to the IP address of the computer running MATLAB. The MATLAB
 The marker printed size is configured here:
 
 ```python
-MARKER_SIZE = 0.100
+MARKER_SIZE = 0.0738
 ```
 
 This value is in meters and must match the actual printed marker edge length. An incorrect value produces an incorrect estimated distance and position.
