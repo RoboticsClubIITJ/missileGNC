@@ -382,7 +382,7 @@ class SimulinkPoseStreamer:
 
     def send(self, marker_array):
         if marker_array is None:
-            return
+            return None, None
         if len(marker_array) != 6:
             raise ValueError("marker_array must contain six pose values")
         packet = struct.pack("<6dI", *marker_array, self.sequence)
