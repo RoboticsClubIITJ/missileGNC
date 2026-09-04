@@ -94,6 +94,8 @@ def main():
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     packet_seq = 0
     last_send_time = None
+    interval_total_ms = 0.0
+    interval_count = 0
 
     try:
         while True:
@@ -171,7 +173,13 @@ def main():
                 send_time = time.perf_counter()
                 if last_send_time is not None:
                     packet_interval_ms = (send_time - last_send_time) * 1000.0
-                    print(f"  Simulink packet interval: {packet_interval_ms:.2f} ms")
+                    interval_total_ms += packet_interval_ms
+                    interval_count += 1
+                    cumulative_average_ms = interval_total_ms / interval_count
+                    print(
+                        f"  Simulink packet interval: {packet_interval_ms:.2f} ms | "
+                        f"cumulative average: {cumulative_average_ms:.2f} ms"
+                    )
                 last_send_time = send_time
                 packet_seq = (packet_seq + 1) & 0xFFFFFFFF
 
