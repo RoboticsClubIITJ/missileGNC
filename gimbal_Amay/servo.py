@@ -424,15 +424,14 @@ def main():
     simulink = SimulinkPoseStreamer()
     origin_pose = None
     coordinates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coordinates.csv")
-    coordinates_file = open(coordinates_path, "a", newline="")
+    coordinates_file = open(coordinates_path, "w", newline="")
     coordinates_writer = csv.writer(coordinates_file)
-    if os.path.getsize(coordinates_path) == 0:
-        coordinates_writer.writerow([
-            "timestamp", "raw_x_m", "raw_y_m", "raw_z_m",
-            "relative_x_m", "relative_y_m", "relative_z_m",
-            "relative_yaw_deg", "relative_pitch_deg",
-        ])
-        coordinates_file.flush()
+    coordinates_writer.writerow([
+        "timestamp", "raw_x_m", "raw_y_m", "raw_z_m",
+        "relative_x_m", "relative_y_m", "relative_z_m",
+        "relative_yaw_deg", "relative_pitch_deg",
+    ])
+    coordinates_file.flush()
     origin_locked = False
     origin_angles = gimbal.current_angles
     search_yaw_direction = 1.0
@@ -510,13 +509,22 @@ def main():
                     relative_pose = None
                 packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
                 if relative_pose is not None:
+                    relative_yaw_deg = math.degrees(
+                        math.atan2(-relative_pose[0], relative_pose[2])
+                    )
+                    relative_pitch_deg = math.degrees(
+                        math.atan2(
+                            relative_pose[1],
+                            math.hypot(relative_pose[0], relative_pose[2]),
+                        )
+                    )
                     coordinates_writer.writerow([
                         f"{time.time():.6f}",
                         f"{marker_array[0]:.6f}", f"{marker_array[1]:.6f}",
                         f"{marker_array[2]:.6f}",
                         f"{relative_pose[0]:.6f}", f"{relative_pose[1]:.6f}",
                         f"{relative_pose[2]:.6f}",
-                        f"{relative_pose[4]:.6f}", f"{marker_array[3]:.6f}",
+                        f"{relative_yaw_deg:.6f}", f"{relative_pitch_deg:.6f}",
                     ])
                     coordinates_file.flush()
                 status = "TRACKING"
