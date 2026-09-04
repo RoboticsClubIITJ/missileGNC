@@ -129,10 +129,10 @@
 
   .stage-outer{
     position: relative;
+    width: 100%;
     height: 100%;
-    aspect-ratio: 1 / 1;
     max-width: 100%;
-    margin: 0 auto;
+    margin: 0;
     background:
       linear-gradient(var(--grid-line) 1px, transparent 1px) 0 0 / 40px 40px,
       linear-gradient(90deg, var(--grid-line) 1px, transparent 1px) 0 0 / 40px 40px,
@@ -406,7 +406,7 @@
     <!-- STAGE -->
     <div class="stage-wrap">
       <div class="stage-head">
-        <h2>DISPLAY &mdash; 500 &times; 500 mm</h2>
+        <h2>DISPLAY &mdash; <span id="dimsLabel">800 &times; 450</span> mm</h2>
         <div class="readout" id="liveReadout">ID12  x=000.0  y=000.0 mm</div>
       </div>
 
@@ -490,11 +490,11 @@
         <div class="field-row">
           <div class="field">
             <label for="xInput">X (mm)</label>
-            <input type="number" id="xInput" min="0" max="500" step="1" value="250">
+            <input type="number" id="xInput" min="0" max="800" step="1" value="400">
           </div>
           <div class="field">
             <label for="yInput">Y (mm)</label>
-            <input type="number" id="yInput" min="0" max="500" step="1" value="250">
+            <input type="number" id="yInput" min="0" max="450" step="1" value="225">
           </div>
         </div>
         <div class="btn-row">
@@ -545,13 +545,14 @@
 
 <script>
 (function(){
-  const STAGE_MM = 500; // logical stage size in mm, maps to the square element
+  const STAGE_W_MM = 800; // nominal logical width in mm; height derives from the rectangle's actual aspect ratio
   const stage = document.getElementById('stage');
   const marker0 = document.getElementById('marker0');
   const marker12 = document.getElementById('marker12');
   const liveReadout = document.getElementById('liveReadout');
   const xInput = document.getElementById('xInput');
   const yInput = document.getElementById('yInput');
+  const dimsLabel = document.getElementById('dimsLabel');
   const statusLine = document.getElementById('statusLine');
   const statusText = document.getElementById('statusText');
   const speedSlider = document.getElementById('speedSlider');
@@ -559,17 +560,23 @@
   const speedVal = document.getElementById('speedVal');
   const radiusVal = document.getElementById('radiusVal');
 
-  let pos12 = { x: 250, y: 250 }; // mm, origin bottom-left, y-up
+  let pos12 = { x: 400, y: 225 }; // mm, origin bottom-left, y-up
   let dragging = false;
   let autoRunning = false;
   let mode = 'circle';
   let t = 0; // animation time accumulator
   let rafId = null;
   let lastTs = null;
-  let randTarget = { x: 250, y: 250 };
+  let randTarget = { x: 400, y: 225 };
 
+  // uniform px-per-mm derived from actual rendered width; height in mm follows the
+  // rectangle's real aspect ratio so the moving space fully fills the panel without distortion
   function stagePxPerMm(){
-    return stage.clientWidth / STAGE_MM;
+    return stage.clientWidth / STAGE_W_MM;
+  }
+  function stageHeightMm(){
+    const ppm = stagePxPerMm();
+    return ppm > 0 ? stage.clientHeight / ppm : STAGE_W_MM;
   }
 
   function markerHalfMm(el){
@@ -582,8 +589,8 @@
   function placeMarker(el, xmm, ymm){
     const ppm = stagePxPerMm();
     const half = markerHalfMm(el);
-    const cx = clamp(xmm, half, STAGE_MM - half);
-    const cy = clamp(ymm, half, STAGE_MM - half);
+    const cx = clamp(xmm, half, STAGE_W_MM - half);
+    const cy = clamp(ymm, half, stageHeightMm() - half);
     const leftPx = cx * ppm - (parseFloat(getComputedStyle(el).getPropertyValue('--m-size')) / 2);
     const bottomPx = cy * ppm - (parseFloat(getComputedStyle(el).getPropertyValue('--m-size')) / 2);
     el.style.left = leftPx + 'px';
@@ -603,6 +610,12 @@
     liveReadout.textContent = 'ID12  x=' + pos12.x.toFixed(1).padStart(5,'0') + '  y=' + pos12.y.toFixed(1).padStart(5,'0') + ' mm';
   }
 
+  function updateDimsLabel(){
+    dimsLabel.textContent = Math.round(STAGE_W_MM) + ' \u00d7 ' + Math.round(stageHeightMm());
+    xInput.max = STAGE_W_MM;
+    yInput.max = Math.round(stageHeightMm());
+  }
+
   function setStatus(text, on){
     statusText.textContent = text;
     statusLine.classList.toggle('on', !!on);
@@ -611,7 +624,7 @@
   // ---- drag handling ----
   function pointerToMm(evt){
     const rect = stage.getBoundingClientRect();
-    const ppm = rect.width / STAGE_MM;
+    const ppm = rect.width / STAGE_W_MM;
     const px = evt.clientX - rect.left;
     const py = evt.clientY - rect.top;
     const xmm = px / ppm;
@@ -663,7 +676,7 @@
 
   document.getElementById('centerPos').addEventListener('click', () => {
     stopAuto(false);
-    pos12 = { x: STAGE_MM/2, y: STAGE_MM/2 };
+    pos12 = { x: STAGE_W_MM/2, y: stageHeightMm()/2 };
     renderMarker12();
     setStatus('Centered', true);
   });
@@ -697,7 +710,8 @@
     const radius = parseFloat(radiusSlider.value);
     t += dt * speed;
 
-    const cx = STAGE_MM / 2, cy = STAGE_MM / 2;
+    const hMm = stageHeightMm();
+    const cx = STAGE_W_MM / 2, cy = hMm / 2;
 
     if (mode === 'circle') {
       pos12 = {
@@ -729,8 +743,8 @@
         const ang = Math.random() * Math.PI * 2;
         const r = 40 + Math.random() * radius;
         randTarget = {
-          x: clamp(cx + r * Math.cos(ang), 40, STAGE_MM - 40),
-          y: clamp(cy + r * Math.sin(ang), 40, STAGE_MM - 40)
+          x: clamp(cx + r * Math.cos(ang), 40, STAGE_W_MM - 40),
+          y: clamp(cy + r * Math.sin(ang), 40, hMm - 40)
         };
       } else {
         const step = Math.min(dist, speed * 90 * dt);
@@ -764,6 +778,7 @@
 
   // ---- init & resize ----
   function renderAll(){
+    updateDimsLabel();
     renderOrigin();
     renderMarker12();
   }
