@@ -450,6 +450,7 @@ def main():
         "timestamp", "raw_x_m", "raw_y_m", "raw_z_m",
         "relative_x_m", "relative_y_m", "relative_z_m",
         "relative_yaw_deg", "relative_pitch_deg",
+        "origin_x_m", "origin_y_m", "origin_z_m", "transform_source",
     ])
     coordinates_file.flush()
     origin_locked = False
@@ -533,23 +534,25 @@ def main():
                 else:
                     relative_pose = None
                 packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
-                if relative_pose is not None:
-                    relative_yaw_deg = math.degrees(
-                        math.atan2(-relative_pose[0], relative_pose[2])
-                    )
-                    relative_pitch_deg = math.degrees(
-                        math.atan2(
-                            relative_pose[1],
-                            math.hypot(relative_pose[0], relative_pose[2]),
-                        )
-                    )
+                if marker_array is not None:
+                    origin_values = origin_marker[:3] if origin_marker is not None else (None, None, None)
+                    transform_source = "marker_frame" if relative_pose is not None else "origin_lost"
+                    relative_values = relative_pose[:3] if relative_pose is not None else (None, None, None)
+                    if relative_pose is not None:
+                        relative_yaw_deg = f"{math.degrees(math.atan2(-relative_pose[0], relative_pose[2])):.6f}"
+                        relative_pitch_deg = f"{math.degrees(math.atan2(relative_pose[1], math.hypot(relative_pose[0], relative_pose[2]))):.6f}"
+                    else:
+                        relative_yaw_deg = ""
+                        relative_pitch_deg = ""
                     coordinates_writer.writerow([
                         f"{time.time():.6f}",
                         f"{marker_array[0]:.6f}", f"{marker_array[1]:.6f}",
                         f"{marker_array[2]:.6f}",
-                        f"{relative_pose[0]:.6f}", f"{relative_pose[1]:.6f}",
-                        f"{relative_pose[2]:.6f}",
-                        f"{relative_yaw_deg:.6f}", f"{relative_pitch_deg:.6f}",
+                        *(f"{value:.6f}" if value is not None else "" for value in relative_values),
+                        relative_yaw_deg,
+                        relative_pitch_deg,
+                        *(f"{value:.6f}" if value is not None else "" for value in origin_values),
+                        transform_source,
                     ])
                     coordinates_file.flush()
                 servo_result = process_marker(marker_array, gimbal, origin_angles)
