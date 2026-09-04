@@ -544,6 +544,7 @@ def main():
                     relative_pose = pose_relative_to_origin(
                         marker_array, origin_angles, camera_angles, origin_pose
                     )
+                    print(f"x={relative_pose[0]:+.6f} y={relative_pose[1]:+.6f}")
                     packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
                     servo_result = process_marker(marker_array, gimbal, origin_angles)
                     origin_values = origin_pose[:3]
