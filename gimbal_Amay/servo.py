@@ -279,17 +279,18 @@ def process_marker(marker_array, gimbal, origin_angles):
     return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[5]
 
 
-def pose_relative_to_origin(marker_array, origin_angles, origin_pose):
+def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_pose):
     """Express a target pose as a metric vector in the latched origin frame."""
     if marker_array is None:
         return None
 
     origin_yaw, origin_pitch = origin_angles
-    target_yaw, target_pitch = offset_to_angles(
+    current_yaw, current_pitch = current_angles
+    target_yaw_error, target_pitch_error = offset_to_angles(
         marker_array[0], marker_array[1], marker_array[2]
     )
-    relative_yaw = math.radians(target_yaw - origin_yaw)
-    relative_pitch = math.radians(target_pitch - origin_pitch)
+    relative_yaw = math.radians(current_yaw + target_yaw_error - origin_yaw)
+    relative_pitch = math.radians(current_pitch + target_pitch_error - origin_pitch)
     distance = marker_array[5]
     horizontal_distance = distance * math.cos(relative_pitch)
     x = -horizontal_distance * math.sin(relative_yaw)
@@ -500,13 +501,15 @@ def main():
                     frame, detector, dictionary, parameters, legacy_api,
                     excluded_marker_id=ORIGIN_MARKER_ID,
                 )
-                packet_interval_ms, cumulative_average_ms = simulink.send(
-                    pose_relative_to_origin(marker_array, origin_angles, origin_pose)
-                )
+                servo_result = process_marker(marker_array, gimbal, origin_angles)
                 if marker_array is not None:
                     relative_pose = pose_relative_to_origin(
-                        marker_array, origin_angles, origin_pose
+                        marker_array, origin_angles, gimbal.current_angles, origin_pose
                     )
+                else:
+                    relative_pose = None
+                packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
+                if relative_pose is not None:
                     coordinates_writer.writerow([
                         f"{time.time():.6f}",
                         f"{marker_array[0]:.6f}", f"{marker_array[1]:.6f}",
@@ -516,7 +519,6 @@ def main():
                         f"{relative_pose[4]:.6f}", f"{marker_array[3]:.6f}",
                     ])
                     coordinates_file.flush()
-                servo_result = process_marker(marker_array, gimbal, origin_angles)
                 status = "TRACKING"
 
                 if packet_interval_ms is not None:
