@@ -277,7 +277,6 @@ def process_marker(marker_array, gimbal, origin_angles):
     relative_pitch = pitch - origin_pitch
     return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[5]
 
-
 def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_pose):
     """Express a target pose as a metric vector in the latched origin frame."""
     if marker_array is None:
@@ -293,7 +292,7 @@ def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_
     distance = marker_array[5]
     horizontal_distance = distance * math.cos(relative_pitch)
     x = -horizontal_distance * math.sin(relative_yaw)
-    y = -distance * math.sin(relative_pitch)
+    y = distance * math.sin(relative_pitch)
     z = horizontal_distance * math.cos(relative_yaw)
     return [
         float(x - origin_pose[0]),
@@ -303,8 +302,6 @@ def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_
         math.degrees(relative_yaw),
         float(distance),
     ]
-
-
 def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     """Express a target center in the origin marker's coordinate frame."""
     camera_delta = np.asarray(target_pose[:3]) - np.asarray(origin_pose[:3])
