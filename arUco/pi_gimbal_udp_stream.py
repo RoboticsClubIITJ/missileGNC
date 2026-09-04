@@ -93,6 +93,7 @@ def main():
     # UDP socket used to stream pose packets to the Simulink model
     udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     packet_seq = 0
+    last_send_time = None
 
     try:
         while True:
@@ -167,6 +168,11 @@ def main():
                 # value instead of glitching to zero.
                 packet = struct.pack('<6dI', *marker_array, packet_seq)
                 udp_sock.sendto(packet, (SIMULINK_HOST, SIMULINK_PORT))
+                send_time = time.perf_counter()
+                if last_send_time is not None:
+                    packet_interval_ms = (send_time - last_send_time) * 1000.0
+                    print(f"  Simulink packet interval: {packet_interval_ms:.2f} ms")
+                last_send_time = send_time
                 packet_seq = (packet_seq + 1) & 0xFFFFFFFF
 
             print(f"  Inference   : {inference_time_ms:.2f} ms | FPS: {fps:.2f}")

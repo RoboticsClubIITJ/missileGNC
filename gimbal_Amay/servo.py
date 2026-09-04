@@ -374,6 +374,8 @@ class SimulinkPoseStreamer:
         self.address = (host, port)
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sequence = 0
+        self.last_send_time = None
+        self.packet_interval_ms = None
 
     def send(self, marker_array):
         if marker_array is None:
@@ -382,7 +384,12 @@ class SimulinkPoseStreamer:
             raise ValueError("marker_array must contain six pose values")
         packet = struct.pack("<6dI", *marker_array, self.sequence)
         self.socket.sendto(packet, self.address)
+        send_time = time.perf_counter()
+        if self.last_send_time is not None:
+            self.packet_interval_ms = (send_time - self.last_send_time) * 1000.0
+        self.last_send_time = send_time
         self.sequence = (self.sequence + 1) & 0xFFFFFFFF
+        return self.packet_interval_ms
 
     def close(self):
         self.socket.close()
@@ -463,9 +470,14 @@ def main():
                     frame, detector, dictionary, parameters, legacy_api,
                     excluded_marker_id=ORIGIN_MARKER_ID,
                 )
-                simulink.send(pose_relative_to_origin(marker_array, origin_angles))
+                packet_interval_ms = simulink.send(
+                    pose_relative_to_origin(marker_array, origin_angles)
+                )
                 servo_result = process_marker(marker_array, gimbal, origin_angles)
                 status = "TRACKING"
+
+                if packet_interval_ms is not None:
+                    print(f"Simulink packet interval: {packet_interval_ms:.2f} ms")
 
             response_ms = (time.perf_counter() - frame_start) * 1000.0
             fps = 1000.0 / response_ms if response_ms > 0 else 0.0
