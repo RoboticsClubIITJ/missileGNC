@@ -9,6 +9,6 @@ while True:
     if len(data) != 52:
         print(f"Unexpected size {len(data)} bytes from {addr}")
         continue
-    x, y, z, pitch, yaw, distance, seq = struct.unpack("<6dI", data)
+        x, y, z, bearing_pitch, bearing_yaw, distance, seq = struct.unpack("<6dI", data)
     print(f"seq={seq:>10} x={x:+.3f} y={y:+.3f} z={z:+.3f} "
-          f"pitch={pitch:+.2f} yaw={yaw:+.2f} dist={distance:.3f}")
+            f"bearing_pitch={bearing_pitch:+.2f} bearing_yaw={bearing_yaw:+.2f} dist={distance:.3f}")

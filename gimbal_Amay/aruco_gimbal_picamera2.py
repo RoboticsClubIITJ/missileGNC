@@ -89,7 +89,7 @@ def detect_marker_center(frame, detector, dictionary, parameters, legacy_api, ma
 def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
                        detection_scale=DETECTION_SCALE, excluded_marker_id=None,
                        required_marker_id=None, return_rotation=False):
-    """Detect the first marker and return [x, y, z, pitch, yaw, distance]."""
+    """Detect the first marker and return [x, y, z, distance]."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     detection_gray = cv2.resize(
         gray, None, fx=detection_scale, fy=detection_scale,
@@ -133,10 +133,8 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
     if not success:
         return (None, None, corners, ids) if return_rotation else (None, corners, ids)
     x, y, z = tvec.flatten()
-    rotation_matrix, _ = cv2.Rodrigues(rvec)
-    pitch, yaw, _ = cv2.RQDecomp3x3(rotation_matrix)[0]
     distance = math.sqrt(x ** 2 + y ** 2 + z ** 2)
-    pose = [float(x), float(y), float(z), float(pitch), float(yaw), float(distance)]
+    pose = [float(x), float(y), float(z), float(distance)]
     if return_rotation:
         return pose, rotation_matrix, corners, ids
     return pose, corners, ids
@@ -285,7 +283,7 @@ def main():
                     for corner in corners
                 ]
 
-            marker_array = None  # will hold [x, y, z, pitch, yaw] for the detected marker
+            marker_array = None  # will hold [x, y, z, distance] for the detected marker
             pose_results = []
 
             if ids is not None and len(ids) > 0:
@@ -302,15 +300,11 @@ def main():
                     x, y, z = t[0], t[1], t[2]
                     distance = math.sqrt(x**2 + y**2 + z**2)
 
-                    rot_mat, _ = cv2.Rodrigues(rvec)
-                    pitch, yaw, roll = cv2.RQDecomp3x3(rot_mat)[0]
-
-                    # [x, y, z] in meters (camera frame), pitch/yaw in degrees,
-                    # distance in meters (straight-line from camera to marker).
+                    # [x, y, z] in meters (camera frame), distance in meters.
                     # Overwritten each loop -> holds the LAST detected marker in
                     # this frame if multiple markers are visible at once.
-                    marker_array = [float(x), float(y), float(z), float(pitch), float(yaw), float(distance)]
-                    pose_results.append((i, rvec, tvec, x, y, z, pitch, yaw, roll))
+                    marker_array = [float(x), float(y), float(z), float(distance)]
+                    pose_results.append((i, rvec, tvec, x, y, z))
 
             end_time = time.perf_counter()
             # =======================================================
@@ -323,15 +317,14 @@ def main():
 
             if ids is not None and len(ids) > 0:
                 cv2.aruco.drawDetectedMarkers(display_frame, corners, ids)
-                for i, rvec, tvec, x, y, z, pitch, yaw, roll in pose_results:
+                for i, rvec, tvec, x, y, z in pose_results:
                     cv2.drawFrameAxes(display_frame, camera_matrix, dist_coeffs, rvec, tvec, MARKER_SIZE / 2)
 
                     print(f"Marker ID: {ids.flatten()[i]}")
                     print(f"  Coordinates : X={x:.3f}m, Y={y:.3f}m, Z={z:.3f}m")
-                    print(f"  Rotation    : P={pitch:.1f}°, Y={yaw:.1f}°, R={roll:.1f}°")
 
             if marker_array is not None:
-                # This is the array you asked for: [x, y, z, pitch, yaw, distance]
+                # This is the pose array: [x, y, z, distance]
                 print(f"  Array       : {marker_array}")
                 # marker_array is a plain Python list here — feed it directly
                 # into a serial/socket send, a queue, or a gimbal controller

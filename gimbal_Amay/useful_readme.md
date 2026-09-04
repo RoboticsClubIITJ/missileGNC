@@ -17,7 +17,7 @@ For every valid marker detection, `servo.py` sends one UDP datagram to `SIMULINK
 The payload is:
 
 ```text
-[x, y, z, pitch, yaw, distance, sequence_number]
+[x, y, z, bearing_pitch, bearing_yaw, distance, sequence_number]
 ```
 
 Binary format:

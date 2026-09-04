@@ -10,7 +10,7 @@ Pi Camera
    v
 aruco_gimbal_picamera2.py
    |
-   | marker pose: [x, y, z, pitch, yaw, distance]
+   | marker pose: [x, y, z, distance]
    +----------------------+
    |                      |
    v                      v
@@ -64,16 +64,17 @@ When `servo.py` is running, the following sequence repeats for every camera fram
 5. Once ID `0` is centered, the current pan/tilt angles are latched permanently as the origin. ID `0` is excluded from subsequent target tracking.
 6. Target markers are passed to OpenCV `solvePnP()` together with `MARKER_SIZE` and camera calibration.
 7. `solvePnP()` returns the target translation `(x, y, z)` in meters. The target is converted to coordinates relative to the latched origin before UDP transmission.
-6. The six values are stored in this order:
+6. The detector pose contains four values:
 
    ```text
-   [x, y, z, pitch, yaw, distance]
+   [x, y, z, distance]
    ```
 
-7. The target pose relative to the latched origin is sent to MATLAB as a UDP datagram. Marker ID `0` is never transmitted.
-8. The `x` and `y` values are passed to `GimbalController`.
-9. The controller calculates the desired pan and tilt angles, clamps them to the configured limits, converts them to pulse widths, and commands the servos through `pigpio`.
-10. The camera frame is displayed. Pressing `q` exits the loop and releases the hardware and network resources.
+7. Before transmission, the target vector is rotated from the current camera orientation back into the latched origin orientation, then the stored ID `0` origin vector is subtracted. ID `0` is never transmitted.
+8. The resulting six-value pose is sent to MATLAB as a UDP datagram.
+9. The `x` and `y` values are passed to `GimbalController`.
+10. The controller calculates the desired pan and tilt angles, clamps them to the configured limits, converts them to pulse widths, and commands the servos through `pigpio`.
+11. The camera frame is displayed. Pressing `q` exits the loop and releases the hardware and network resources.
 
 After origin lock, if no target marker is detected, no UDP pose packet is sent
 and the tracking controller is not updated for that frame. The MATLAB receiver
@@ -256,7 +257,7 @@ The detector returns marker coordinates in the camera coordinate system:
 - `y`: vertical offset in meters; positive is camera-down
 - `z`: forward distance in meters
 
-`servo.py` uses the full marker vector. Pan is calculated in the horizontal
+`servo.py` uses the position and distance values. Pan is calculated in the horizontal
 plane, while tilt uses the horizontal range `sqrt(x^2 + z^2)`:
 
 ```python
@@ -309,7 +310,7 @@ For every valid marker detection, `servo.py` sends one UDP datagram to `SIMULINK
 The payload is:
 
 ```text
-[x, y, z, pitch, yaw, distance, sequence_number]
+[x, y, z, bearing_pitch, bearing_yaw, distance, sequence_number]
 ```
 
 Binary format:
@@ -389,12 +390,12 @@ python3 servo.py
 
 The monitor scopes should receive these six values:
 
-1. `X`: marker horizontal position, meters
-2. `Y`: marker vertical position, meters
-3. `Z`: marker forward position, meters
-4. `Pitch`: marker rotation, degrees
-5. `Yaw`: marker rotation, degrees
-6. `Distance`: straight-line camera-to-marker distance, meters
+1. `X`: target horizontal position relative to the latched origin, meters
+2. `Y`: target vertical position relative to the latched origin, meters
+3. `Z`: target forward position relative to the latched origin, meters
+4. `bearing_pitch`: target bearing from the origin frame, degrees
+5. `bearing_yaw`: target bearing from the origin frame, degrees
+6. `Distance`: straight-line camera-to-target distance, meters
 
 The receiver also outputs `seq`, the packet sequence number, and `isNew`, which is true only when a new packet arrived. If the marker disappears, the receiver holds the last pose and sets `isNew` to false.
 
@@ -445,7 +446,7 @@ Only one process should bind to UDP port `25000` on the MATLAB computer. Close t
 The receiver has three outputs:
 
 ```text
-Output 1: pose = [x y z pitch yaw distance]
+Output 1: pose = [x y z bearing_pitch bearing_yaw distance]
 Output 2: seq  = uint32 packet counter
 Output 3: isNew = boolean fresh-packet flag
 ```
@@ -459,11 +460,11 @@ The UDP receiver only transports measurements. It does not automatically know wh
 Before connecting signals, check the existing model input labels and units:
 
 - Use `x` and `y` if the model expects marker position in meters.
-- Use `pitch` and `yaw` if the model expects measured angles in degrees, converting to radians if required.
+- Use `bearing_pitch` and `bearing_yaw` if the model expects target bearing angles in degrees, converting to radians if required.
 - Use `distance` if the model needs range.
 - Use `z` only if the model needs the marker's forward camera coordinate.
 
-If the model expects radians, insert a **Gain** block with gain `pi/180` on the degree-valued pitch or yaw signals. If it expects a different coordinate direction, insert a **Gain** block with `-1` where necessary and document that convention in the model.
+If the model expects radians, insert a **Gain** block with gain `pi/180` on the degree-valued bearing signals. If it expects a different coordinate direction, insert a **Gain** block with `-1` where necessary and document that convention in the model.
 
 Use the `isNew` output to prevent stale measurements from updating the guidance logic. A common arrangement is:
 
