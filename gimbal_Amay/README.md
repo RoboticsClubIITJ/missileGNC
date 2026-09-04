@@ -192,9 +192,13 @@ CORNER_REFINE_ITERATIONS = 10
 CORNER_REFINE_EPSILON = 0.01
 ```
 
-Lower `DETECTION_SCALE` can reduce response time, but a 100 mm marker may then
+Lower `DETECTION_SCALE` can reduce response time, but a 73.8 mm marker may then
 become too small to detect reliably. The runtime starts at `0.60`; test `0.50`
 only if the marker remains clearly visible at its farthest operating distance.
+
+Before origin lock, the gimbal scans pan from side to side in `1.5` degree
+steps. At each pan edge it moves upward by `2` degrees, reverses pan direction,
+and continues the raster search for marker ID `0`.
 
 Check the wiring and limits before attaching the mechanical load. A wrong GPIO or pulse range can move a servo unexpectedly.
 

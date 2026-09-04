@@ -409,7 +409,7 @@ def main():
     origin_locked = False
     origin_angles = gimbal.current_angles
     search_yaw_direction = 1.0
-    search_pitch_direction = 1.0
+    search_pitch_direction = -1.0
 
     try:
         while True:

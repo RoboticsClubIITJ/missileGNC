@@ -228,10 +228,10 @@ CORNER_REFINE_EPSILON = 0.01
 # controller uses image-space error until this marker is centered.
 ORIGIN_MARKER_ID = 0
 ORIGIN_CENTER_TOLERANCE_PX = 18
-SEARCH_STEP_DEG = 0.75
-SEARCH_TILT_STEP_DEG = 0.75
-SEARCH_UPDATE_PERIOD_S = 0.12
-ORIGIN_SEARCH_LIMIT_DEG = 90.0
+SEARCH_STEP_DEG = 1.5
+SEARCH_TILT_STEP_DEG = 2.0
+SEARCH_UPDATE_PERIOD_S = 0.10
+ORIGIN_SEARCH_LIMIT_DEG = 60.0
 ORIGIN_SEARCH_TILT_LIMIT_DEG = 45.0
 
 # No software angle limits: the configured per-frame step limit still reduces
