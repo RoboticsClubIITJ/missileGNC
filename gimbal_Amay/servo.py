@@ -326,6 +326,13 @@ def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     ]
 
 
+def pose_has_valid_depth(marker_array, previous_z, max_depth_step=0.15):
+    """Reject isolated solvePnP depth spikes without changing valid poses."""
+    if marker_array is None or not math.isfinite(marker_array[2]) or marker_array[2] <= 0:
+        return False
+    return previous_z is None or abs(marker_array[2] - previous_z) <= max_depth_step
+
+
 def draw_target_hud(frame, marker_array, servo_result, response_ms, fps, status):
     """Draw a readable targeting HUD over the live camera frame."""
     height, width = frame.shape[:2]
@@ -454,6 +461,7 @@ def main():
     ])
     coordinates_file.flush()
     origin_locked = False
+    previous_valid_z = None
     origin_angles = gimbal.current_angles
     search_yaw_direction = 1.0
     search_pitch_direction = -1.0
@@ -522,12 +530,27 @@ def main():
                     excluded_marker_id=ORIGIN_MARKER_ID,
                     return_rotation=True,
                 )
-                camera_angles = gimbal.current_angles
-                relative_pose = pose_relative_to_origin(
-                    marker_array, origin_angles, camera_angles, origin_pose
-                )
-                packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
-                if marker_array is not None:
+                if marker_array is None:
+                    packet_interval_ms = None
+                    cumulative_average_ms = None
+                    servo_result = None
+                    relative_pose = None
+                    status = "NO TARGET"
+                elif not pose_has_valid_depth(marker_array, previous_valid_z):
+                    marker_array = None
+                    packet_interval_ms = None
+                    cumulative_average_ms = None
+                    servo_result = None
+                    relative_pose = None
+                    status = "REJECTED POSE OUTLIER"
+                else:
+                    previous_valid_z = marker_array[2]
+                    servo_result = process_marker(marker_array, gimbal, origin_angles)
+                    camera_angles = gimbal.current_angles
+                    relative_pose = pose_relative_to_origin(
+                        marker_array, origin_angles, camera_angles, origin_pose
+                    )
+                    packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
                     origin_values = origin_pose[:3]
                     transform_source = "latched_origin"
                     relative_values = relative_pose[:3] if relative_pose is not None else (None, None, None)
@@ -548,8 +571,7 @@ def main():
                         transform_source,
                     ])
                     coordinates_file.flush()
-                servo_result = process_marker(marker_array, gimbal, origin_angles)
-                status = "TRACKING"
+                    status = "TRACKING"
 
                 if packet_interval_ms is not None:
                     print(
