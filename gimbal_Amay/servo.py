@@ -522,21 +522,14 @@ def main():
                     excluded_marker_id=ORIGIN_MARKER_ID,
                     return_rotation=True,
                 )
-                origin_marker, origin_rotation, _, _ = detect_marker_pose(
-                    frame, detector, dictionary, parameters, legacy_api,
-                    required_marker_id=ORIGIN_MARKER_ID,
-                    return_rotation=True,
+                camera_angles = gimbal.current_angles
+                relative_pose = pose_relative_to_origin(
+                    marker_array, origin_angles, camera_angles, origin_pose
                 )
-                if marker_array is not None and origin_marker is not None:
-                    relative_pose = pose_relative_to_marker(
-                        marker_array, origin_marker, origin_rotation
-                    )
-                else:
-                    relative_pose = None
                 packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
                 if marker_array is not None:
-                    origin_values = origin_marker[:3] if origin_marker is not None else (None, None, None)
-                    transform_source = "marker_frame" if relative_pose is not None else "origin_lost"
+                    origin_values = origin_pose[:3]
+                    transform_source = "latched_origin"
                     relative_values = relative_pose[:3] if relative_pose is not None else (None, None, None)
                     if relative_pose is not None:
                         relative_yaw_deg = f"{math.degrees(math.atan2(-relative_pose[0], relative_pose[2])):.6f}"
@@ -556,7 +549,7 @@ def main():
                     ])
                     coordinates_file.flush()
                 servo_result = process_marker(marker_array, gimbal, origin_angles)
-                status = "TRACKING" if origin_marker is not None else "ORIGIN LOST"
+                status = "TRACKING"
 
                 if packet_interval_ms is not None:
                     print(
