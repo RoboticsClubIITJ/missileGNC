@@ -550,15 +550,7 @@ def main():
                     relative_pose = pose_relative_to_origin(
                         marker_array, origin_angles, camera_angles, origin_pose
                     )
-                    absolute_pose = [
-                        float(marker_array[0]),
-                        float(marker_array[1]),
-                        float(marker_array[2]),
-                        float(marker_array[3]),
-                        float(marker_array[4]),
-                        float(marker_array[5]),
-                    ]
-                    packet_interval_ms, cumulative_average_ms = simulink.send(absolute_pose)
+                    packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
                     origin_values = origin_pose[:3]
                     transform_source = "latched_origin"
                     relative_values = relative_pose[:3] if relative_pose is not None else (None, None, None)

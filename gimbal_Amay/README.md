@@ -70,7 +70,7 @@ When `servo.py` is running, the following sequence repeats for every camera fram
    [x, y, z, pitch, yaw, distance]
    ```
 
-7. The same pose is sent to MATLAB as a UDP datagram.
+7. The target pose relative to the latched origin is sent to MATLAB as a UDP datagram. Marker ID `0` is never transmitted.
 8. The `x` and `y` values are passed to `GimbalController`.
 9. The controller calculates the desired pan and tilt angles, clamps them to the configured limits, converts them to pulse widths, and commands the servos through `pigpio`.
 10. The camera frame is displayed. Pressing `q` exits the loop and releases the hardware and network resources.
