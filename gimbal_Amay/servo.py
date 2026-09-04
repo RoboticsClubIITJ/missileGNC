@@ -500,10 +500,10 @@ def main():
                     frame, detector, dictionary, parameters, legacy_api,
                     excluded_marker_id=ORIGIN_MARKER_ID,
                 )
-                servo_result = process_marker(marker_array, gimbal, origin_angles)
+                camera_angles = gimbal.current_angles
                 if marker_array is not None:
                     relative_pose = pose_relative_to_origin(
-                        marker_array, origin_angles, gimbal.current_angles, origin_pose
+                        marker_array, origin_angles, camera_angles, origin_pose
                     )
                 else:
                     relative_pose = None
@@ -527,6 +527,7 @@ def main():
                         f"{relative_yaw_deg:.6f}", f"{relative_pitch_deg:.6f}",
                     ])
                     coordinates_file.flush()
+                servo_result = process_marker(marker_array, gimbal, origin_angles)
                 status = "TRACKING"
 
                 if packet_interval_ms is not None:
