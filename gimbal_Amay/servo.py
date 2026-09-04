@@ -294,11 +294,11 @@ def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_
     distance = marker_array[5]
     horizontal_distance = distance * math.cos(relative_pitch)
     x = -horizontal_distance * math.sin(relative_yaw)
-    y = distance * math.sin(relative_pitch)
+    y = -distance * math.sin(relative_pitch)
     z = horizontal_distance * math.cos(relative_yaw)
     return [
         float(x - origin_pose[0]),
-        float(y - origin_pose[1]),
+        float(y + origin_pose[1]),
         float(z - origin_pose[2]),
         marker_array[3],
         math.degrees(relative_yaw),
