@@ -7,6 +7,7 @@ import struct
 import csv
 import os
 import cv2
+import numpy as np
 
 try:
     from picamera2 import Picamera2
@@ -306,6 +307,25 @@ def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_
     ]
 
 
+def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
+    """Express a target center in the origin marker's coordinate frame."""
+    camera_delta = np.asarray(target_pose[:3]) - np.asarray(origin_pose[:3])
+    marker_delta = origin_rotation.T @ camera_delta
+    x, camera_y, marker_z = marker_delta.tolist()
+    y = camera_y
+    z = -marker_z
+    distance = target_pose[5]
+    horizontal_distance = math.hypot(x, z)
+    return [
+        float(x),
+        float(y),
+        float(z),
+        target_pose[3],
+        math.degrees(math.atan2(-x, z)),
+        float(distance),
+    ]
+
+
 def draw_target_hud(frame, marker_array, servo_result, response_ms, fps, status):
     """Draw a readable targeting HUD over the live camera frame."""
     height, width = frame.shape[:2]
@@ -496,12 +516,22 @@ def main():
                         servo_result = None
                         status = "CENTERING ORIGIN ID 0"
             else:
-                marker_array, corners, ids = detect_marker_pose(
+                marker_array, target_rotation, corners, ids = detect_marker_pose(
                     frame, detector, dictionary, parameters, legacy_api,
                     excluded_marker_id=ORIGIN_MARKER_ID,
+                    return_rotation=True,
+                )
+                origin_marker, origin_rotation, _, _ = detect_marker_pose(
+                    frame, detector, dictionary, parameters, legacy_api,
+                    required_marker_id=ORIGIN_MARKER_ID,
+                    return_rotation=True,
                 )
                 camera_angles = gimbal.current_angles
-                if marker_array is not None:
+                if marker_array is not None and origin_marker is not None:
+                    relative_pose = pose_relative_to_marker(
+                        marker_array, origin_marker, origin_rotation
+                    )
+                elif marker_array is not None:
                     relative_pose = pose_relative_to_origin(
                         marker_array, origin_angles, camera_angles, origin_pose
                     )

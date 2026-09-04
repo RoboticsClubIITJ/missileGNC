@@ -88,7 +88,7 @@ def detect_marker_center(frame, detector, dictionary, parameters, legacy_api, ma
 
 def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
                        detection_scale=DETECTION_SCALE, excluded_marker_id=None,
-                       required_marker_id=None):
+                       required_marker_id=None, return_rotation=False):
     """Detect the first marker and return [x, y, z, pitch, yaw, distance]."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     detection_gray = cv2.resize(
@@ -99,7 +99,7 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
         detection_gray, detector, dictionary, parameters, legacy_api
     )
     if ids is None or len(ids) == 0:
-        return None, corners, ids
+        return (None, None, corners, ids) if return_rotation else (None, corners, ids)
     corners = [corner / detection_scale for corner in corners]
     criteria = (
         cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
@@ -115,7 +115,7 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
             if int(detected_id) == required_marker_id
         ]
         if not matching_indices:
-            return None, corners, ids
+            return (None, None, corners, ids) if return_rotation else (None, corners, ids)
         marker_index = matching_indices[0]
     if excluded_marker_id is not None:
         matching_indices = [
@@ -123,7 +123,7 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
             if int(detected_id) != excluded_marker_id
         ]
         if not matching_indices:
-            return None, corners, ids
+            return (None, None, corners, ids) if return_rotation else (None, corners, ids)
         marker_index = matching_indices[0]
 
     success, rvec, tvec = cv2.solvePnP(
@@ -131,12 +131,15 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
         flags=cv2.SOLVEPNP_IPPE_SQUARE
     )
     if not success:
-        return None, corners, ids
+        return (None, None, corners, ids) if return_rotation else (None, corners, ids)
     x, y, z = tvec.flatten()
     rotation_matrix, _ = cv2.Rodrigues(rvec)
     pitch, yaw, _ = cv2.RQDecomp3x3(rotation_matrix)[0]
     distance = math.sqrt(x ** 2 + y ** 2 + z ** 2)
-    return [float(x), float(y), float(z), float(pitch), float(yaw), float(distance)], corners, ids
+    pose = [float(x), float(y), float(z), float(pitch), float(yaw), float(distance)]
+    if return_rotation:
+        return pose, rotation_matrix, corners, ids
+    return pose, corners, ids
 
 def main():
     ADAPTIVE_THRESH_WINDOWS = 1
