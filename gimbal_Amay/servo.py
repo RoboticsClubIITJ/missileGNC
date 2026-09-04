@@ -545,12 +545,12 @@ def main():
                     status = "REJECTED POSE OUTLIER"
                 else:
                     previous_valid_z = marker_array[2]
-                    servo_result = process_marker(marker_array, gimbal, origin_angles)
                     camera_angles = gimbal.current_angles
                     relative_pose = pose_relative_to_origin(
                         marker_array, origin_angles, camera_angles, origin_pose
                     )
                     packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
+                    servo_result = process_marker(marker_array, gimbal, origin_angles)
                     origin_values = origin_pose[:3]
                     transform_source = "latched_origin"
                     relative_values = relative_pose[:3] if relative_pose is not None else (None, None, None)
