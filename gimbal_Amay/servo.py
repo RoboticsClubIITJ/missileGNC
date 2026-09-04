@@ -1,5 +1,3 @@
-
-
 import math
 import time
 import socket
@@ -299,7 +297,7 @@ def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_
     z = horizontal_distance * math.cos(relative_yaw)
     return [
         float(x - origin_pose[0]),
-        float(y + origin_pose[1]),
+        float(y - origin_pose[1]),
         float(z - origin_pose[2]),
         marker_array[3],
         math.degrees(relative_yaw),
