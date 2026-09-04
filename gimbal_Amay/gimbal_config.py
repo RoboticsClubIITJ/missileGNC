@@ -207,16 +207,16 @@ US_PER_DEGREE = 8.0
 # are filtered, reduced by CONTROL_GAIN, ignored inside the deadband, and
 # limited per camera frame.
 # PID gains operate on the filtered angular error in degrees.
-CONTROL_GAIN = 0.30
+CONTROL_GAIN = 0.45
 INTEGRAL_GAIN = 0.0
 DERIVATIVE_GAIN = 0.0
 DERIVATIVE_LIMIT_DEG_S = 45.0
 INTEGRAL_LIMIT_DEG_S = 2.0
 ERROR_DEADBAND_DEG = 0.80
 MIN_COMMAND_DEG = 0.05
-MAX_STEP_DEG = 3.0
-CONTROL_UPDATE_PERIOD_S = 0.03
-ANGLE_FILTER_ALPHA = 0.25
+MAX_STEP_DEG = 4.0
+CONTROL_UPDATE_PERIOD_S = 0.02
+ANGLE_FILTER_ALPHA = 0.35
 
 # Detection performance controls. Lower DETECTION_SCALE is faster but makes
 # very small markers harder to detect; 0.60 is a fast balanced setting.
