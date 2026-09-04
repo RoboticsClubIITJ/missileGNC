@@ -44,7 +44,10 @@ from gimbal_config import (
     ORIGIN_MARKER_ID,
     ORIGIN_CENTER_TOLERANCE_PX,
     SEARCH_STEP_DEG,
+    SEARCH_TILT_STEP_DEG,
+    SEARCH_UPDATE_PERIOD_S,
     ORIGIN_SEARCH_LIMIT_DEG,
+    ORIGIN_SEARCH_TILT_LIMIT_DEG,
     SIMULINK_HOST,
     SIMULINK_PORT,
 )
@@ -103,6 +106,7 @@ class GimbalController:
         self._previous_yaw_error = 0.0
         self._previous_pitch_error = 0.0
         self._previous_update_time = time.perf_counter()
+        self._last_search_time = self._previous_update_time
 
         self.pi = None
         if PIGPIO_AVAILABLE:
@@ -184,14 +188,33 @@ class GimbalController:
         self._previous_pitch_error = 0.0
         self._previous_update_time = time.perf_counter()
 
-    def search_step(self, direction):
-        """Move slowly during origin search and return the new servo angles."""
+    def search_step(self, yaw_direction, pitch_direction):
+        """Move slowly in a horizontal raster while searching for marker 0."""
+        now = time.perf_counter()
+        if now - self._last_search_time < SEARCH_UPDATE_PERIOD_S:
+            return self._current_yaw, self._current_pitch, False, False
+        self._last_search_time = now
+
+        next_yaw = self._current_yaw + yaw_direction * SEARCH_STEP_DEG
+        hit_yaw_limit = not (-ORIGIN_SEARCH_LIMIT_DEG <= next_yaw <= ORIGIN_SEARCH_LIMIT_DEG)
         self._current_yaw = clamp(
-            self._current_yaw + direction * SEARCH_STEP_DEG,
-            (-ORIGIN_SEARCH_LIMIT_DEG, ORIGIN_SEARCH_LIMIT_DEG),
+            next_yaw, (-ORIGIN_SEARCH_LIMIT_DEG, ORIGIN_SEARCH_LIMIT_DEG)
         )
+
+        hit_pitch_limit = False
+        if hit_yaw_limit:
+            next_pitch = self._current_pitch + pitch_direction * SEARCH_TILT_STEP_DEG
+            hit_pitch_limit = not (
+                -ORIGIN_SEARCH_TILT_LIMIT_DEG
+                <= next_pitch
+                <= ORIGIN_SEARCH_TILT_LIMIT_DEG
+            )
+            self._current_pitch = clamp(
+                next_pitch,
+                (-ORIGIN_SEARCH_TILT_LIMIT_DEG, ORIGIN_SEARCH_TILT_LIMIT_DEG),
+            )
         self._drive(self._current_yaw, self._current_pitch)
-        return self._current_yaw, self._current_pitch
+        return self._current_yaw, self._current_pitch, hit_yaw_limit, hit_pitch_limit
 
     @property
     def current_angles(self):
@@ -385,7 +408,8 @@ def main():
     simulink = SimulinkPoseStreamer()
     origin_locked = False
     origin_angles = gimbal.current_angles
-    search_direction = 1.0
+    search_yaw_direction = 1.0
+    search_pitch_direction = 1.0
 
     try:
         while True:
@@ -398,9 +422,13 @@ def main():
                     ORIGIN_MARKER_ID,
                 )
                 if origin_center is None:
-                    yaw, _ = gimbal.search_step(search_direction)
-                    if abs(yaw) >= ORIGIN_SEARCH_LIMIT_DEG:
-                        search_direction *= -1.0
+                    _, _, hit_yaw_limit, hit_pitch_limit = gimbal.search_step(
+                        search_yaw_direction, search_pitch_direction
+                    )
+                    if hit_yaw_limit:
+                        search_yaw_direction *= -1.0
+                    if hit_pitch_limit:
+                        search_pitch_direction *= -1.0
                     marker_array = None
                     servo_result = None
                     status = "SEARCHING FOR ORIGIN ID 0"

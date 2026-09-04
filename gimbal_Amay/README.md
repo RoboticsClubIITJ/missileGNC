@@ -75,7 +75,10 @@ When `servo.py` is running, the following sequence repeats for every camera fram
 9. The controller calculates the desired pan and tilt angles, clamps them to the configured limits, converts them to pulse widths, and commands the servos through `pigpio`.
 10. The camera frame is displayed. Pressing `q` exits the loop and releases the hardware and network resources.
 
-If no marker is detected, no UDP pose packet is sent and the servo controller is not updated for that frame. The MATLAB receiver keeps its previous pose and reports `isNew = false`.
+After origin lock, if no target marker is detected, no UDP pose packet is sent
+and the tracking controller is not updated for that frame. The MATLAB receiver
+keeps its previous pose and reports `isNew = false`. Before origin lock, the
+gimbal continues its slow pan/tilt raster search for marker ID `0`.
 
 ## Hardware and Software
 
@@ -166,16 +169,16 @@ TILT_GPIO = 19
 PAN_CENTER_US = 1500
 TILT_CENTER_US = 1500
 US_PER_DEGREE = 10.0
-CONTROL_GAIN = 0.12
+CONTROL_GAIN = 0.30
 INTEGRAL_GAIN = 0.0
 DERIVATIVE_GAIN = 0.0
 DERIVATIVE_LIMIT_DEG_S = 45.0
 INTEGRAL_LIMIT_DEG_S = 2.0
-ERROR_DEADBAND_DEG = 1.0
-MIN_COMMAND_DEG = 0.08
-MAX_STEP_DEG = 0.5
-CONTROL_UPDATE_PERIOD_S = 0.08
-ANGLE_FILTER_ALPHA = 0.10
+ERROR_DEADBAND_DEG = 0.80
+MIN_COMMAND_DEG = 0.05
+MAX_STEP_DEG = 3.0
+CONTROL_UPDATE_PERIOD_S = 0.03
+ANGLE_FILTER_ALPHA = 0.25
 # No software angle limits; MAX_STEP_DEG still limits movement per frame.
 YAW_OFFSET_DEG = 0.0
 PITCH_OFFSET_DEG = 0.0
