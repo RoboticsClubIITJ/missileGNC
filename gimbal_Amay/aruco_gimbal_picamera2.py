@@ -40,12 +40,12 @@ def create_aruco_detector():
     if hasattr(cv2.aruco, "ArucoDetector"):
         parameters = cv2.aruco.DetectorParameters()
         parameters.adaptiveThreshWinSizeMin = 5
-        parameters.adaptiveThreshWinSizeMax = 5
+        parameters.adaptiveThreshWinSizeMax = 31
         parameters.adaptiveThreshWinSizeStep = 5
         return cv2.aruco.ArucoDetector(dictionary, parameters), dictionary, parameters, False
     parameters = cv2.aruco.DetectorParameters_create()
     parameters.adaptiveThreshWinSizeMin = 5
-    parameters.adaptiveThreshWinSizeMax = 5
+    parameters.adaptiveThreshWinSizeMax = 31
     parameters.adaptiveThreshWinSizeStep = 5
     return None, dictionary, parameters, True
 
@@ -57,22 +57,29 @@ def detect_markers(gray, detector, dictionary, parameters, legacy_api):
 
 
 def detect_marker_center(frame, detector, dictionary, parameters, legacy_api, marker_id):
-    """Return the image center of one marker without using its physical size."""
+    """Return one marker center at full resolution without using marker size."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    detection_gray = cv2.resize(
-        gray, None, fx=DETECTION_SCALE, fy=DETECTION_SCALE,
-        interpolation=cv2.INTER_AREA
-    )
     corners, ids, _ = detect_markers(
-        detection_gray, detector, dictionary, parameters, legacy_api
+        gray, detector, dictionary, parameters, legacy_api
     )
     if ids is None:
         return None, corners, ids
 
+    criteria = (
+        cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
+        CORNER_REFINE_ITERATIONS,
+        CORNER_REFINE_EPSILON,
+    )
+    corners = [
+        cv2.cornerSubPix(
+            gray, corner.astype(np.float32), (5, 5), (-1, -1), criteria
+        )
+        for corner in corners
+    ]
     for index, detected_id in enumerate(ids.flatten()):
         if int(detected_id) != marker_id:
             continue
-        points = corners[index][0] / DETECTION_SCALE
+        points = corners[index][0]
         center = points.mean(axis=0)
         return (float(center[0]), float(center[1])), corners, ids
 
