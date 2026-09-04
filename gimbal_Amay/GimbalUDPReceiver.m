@@ -1,10 +1,13 @@
 classdef GimbalUDPReceiver < matlab.System
     % Receive [x,y,z,pitch,yaw,distance] packets from servo.py over UDP.
     % Packet format: six little-endian doubles followed by one uint32.
+    %
+    % Uses Java's DatagramSocket directly (bundled with every MATLAB
+    % install) instead of udpport, so no Instrument Control Toolbox
+    % is required.
 
     properties (Nontunable)
         Port (1,1) double {mustBeInteger, mustBePositive} = 25000
-        LocalIP (1,:) char = '0.0.0.0'
     end
 
     properties (Access = private)
@@ -15,8 +18,8 @@ classdef GimbalUDPReceiver < matlab.System
 
     methods (Access = protected)
         function setupImpl(obj)
-            obj.UDPSocket = udpport("datagram", "LocalPort", obj.Port, ...
-                "LocalHost", obj.LocalIP, "Timeout", 0);
+            obj.UDPSocket = java.net.DatagramSocket(obj.Port);
+            obj.UDPSocket.setSoTimeout(1);   % ms; non-blocking-ish poll
             obj.LastPose = zeros(1, 6);
             obj.LastSeq = uint32(0);
         end
@@ -26,24 +29,35 @@ classdef GimbalUDPReceiver < matlab.System
             seq = obj.LastSeq;
             isNew = false;
 
-            while obj.UDPSocket.NumDatagramsAvailable > 0
+            while true
+                buf = zeros(1, 1024, 'int8');
+                packet = java.net.DatagramPacket(buf, numel(buf));
+
                 try
-                    raw = read(obj.UDPSocket, 52, "uint8");
+                    obj.UDPSocket.receive(packet);
                 catch
-                    flush(obj.UDPSocket);
                     break
                 end
 
-                obj.LastPose = typecast(uint8(raw(1:48)), 'double');
-                obj.LastSeq = typecast(uint8(raw(49:52)), 'uint32');
-                pose = obj.LastPose(:)';
-                seq = obj.LastSeq;
-                isNew = true;
+                len = packet.getLength();
+                data = packet.getData();
+                raw = typecast(int8(data(1:len)), 'uint8');
+
+                if numel(raw) == 52
+                    obj.LastPose = reshape(typecast(uint8(raw(1:48)), 'double'), 1, 6);
+                    obj.LastSeq = typecast(uint8(raw(49:52)), 'uint32');
+                    pose = obj.LastPose;
+                    seq = obj.LastSeq;
+                    isNew = true;
+                end
             end
         end
 
         function releaseImpl(obj)
-            obj.UDPSocket = [];
+            if ~isempty(obj.UDPSocket)
+                obj.UDPSocket.close();
+                obj.UDPSocket = [];
+            end
         end
 
         function resetImpl(obj)
