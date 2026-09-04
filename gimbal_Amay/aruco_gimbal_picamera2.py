@@ -56,8 +56,31 @@ def detect_markers(gray, detector, dictionary, parameters, legacy_api):
     return detector.detectMarkers(gray)
 
 
+def detect_marker_center(frame, detector, dictionary, parameters, legacy_api, marker_id):
+    """Return the image center of one marker without using its physical size."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    detection_gray = cv2.resize(
+        gray, None, fx=DETECTION_SCALE, fy=DETECTION_SCALE,
+        interpolation=cv2.INTER_AREA
+    )
+    corners, ids, _ = detect_markers(
+        detection_gray, detector, dictionary, parameters, legacy_api
+    )
+    if ids is None:
+        return None, corners, ids
+
+    for index, detected_id in enumerate(ids.flatten()):
+        if int(detected_id) != marker_id:
+            continue
+        points = corners[index][0] / DETECTION_SCALE
+        center = points.mean(axis=0)
+        return (float(center[0]), float(center[1])), corners, ids
+
+    return None, corners, ids
+
+
 def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
-                       detection_scale=DETECTION_SCALE):
+                       detection_scale=DETECTION_SCALE, excluded_marker_id=None):
     """Detect the first marker and return [x, y, z, pitch, yaw, distance]."""
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     detection_gray = cv2.resize(
@@ -77,8 +100,18 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
     )
     corners = [cv2.cornerSubPix(gray, corner.astype(np.float32), (5, 5), (-1, -1), criteria)
                for corner in corners]
+    marker_index = 0
+    if excluded_marker_id is not None:
+        matching_indices = [
+            index for index, detected_id in enumerate(ids.flatten())
+            if int(detected_id) != excluded_marker_id
+        ]
+        if not matching_indices:
+            return None, corners, ids
+        marker_index = matching_indices[0]
+
     success, rvec, tvec = cv2.solvePnP(
-        marker_object_points(), corners[0][0], CAMERA_MATRIX, DIST_COEFFS,
+        marker_object_points(), corners[marker_index][0], CAMERA_MATRIX, DIST_COEFFS,
         flags=cv2.SOLVEPNP_IPPE_SQUARE
     )
     if not success:

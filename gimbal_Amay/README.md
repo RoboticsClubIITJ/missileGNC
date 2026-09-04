@@ -23,13 +23,15 @@ Pan/tilt servos       GimbalUDPReceiver.m
                        anjaneya_V7.slx
 ```
 
-`servo.py` is the normal runtime entry point. It performs detection, servo control, and UDP transmission in one process.
+`servo.py` is the normal runtime entry point. It first sweeps the gimbal until
+marker ID `0` is centered, latches that position as a permanent origin, and
+then performs detection, servo control, and UDP transmission in one process.
 
 ## Quick Start Checklist
 
 Complete these steps in this order:
 
-1. Measure the physical ArUco marker edge and set `MARKER_SIZE` in `gimbal_config.py`.
+1. Set the physical target-marker edge and `MARKER_SIZE` in `gimbal_config.py`.
 2. Run camera calibration and confirm that `camera_calibration.npz` is saved in this folder.
 3. Find the MATLAB computer's IP address and set `SIMULINK_HOST` in `gimbal_config.py`.
 4. Put `GimbalUDPReceiver.m` on the MATLAB path.
@@ -58,8 +60,10 @@ When `servo.py` is running, the following sequence repeats for every camera fram
 1. `Picamera2` captures a `640 x 480` image.
 2. The image is converted to grayscale for ArUco detection.
 3. `aruco_gimbal_picamera2.py` searches for markers from the `DICT_6X6_250` dictionary.
-4. The first detected marker is passed to OpenCV `solvePnP()` together with the marker size and camera calibration.
-5. `solvePnP()` returns the marker translation `(x, y, z)` in meters. Rotation is converted into `pitch` and `yaw`, and straight-line distance is calculated.
+4. Before origin lock, only marker ID `0` is used. Its image center is aligned without `solvePnP()`, so its physical size is irrelevant.
+5. Once ID `0` is centered, the current pan/tilt angles are latched permanently as the origin. ID `0` is excluded from subsequent target tracking.
+6. Target markers are passed to OpenCV `solvePnP()` together with `MARKER_SIZE` and camera calibration.
+7. `solvePnP()` returns the target translation `(x, y, z)` in meters. The target is converted to coordinates relative to the latched origin before UDP transmission.
 6. The six values are stored in this order:
 
    ```text
@@ -162,13 +166,16 @@ TILT_GPIO = 19
 PAN_CENTER_US = 1500
 TILT_CENTER_US = 1500
 US_PER_DEGREE = 10.0
-CONTROL_GAIN = 0.75
-INTEGRAL_GAIN = 0.03
-DERIVATIVE_GAIN = 0.08
-INTEGRAL_LIMIT_DEG_S = 8.0
-ERROR_DEADBAND_DEG = 0.20
-MAX_STEP_DEG = 5.0
-ANGLE_FILTER_ALPHA = 0.60
+CONTROL_GAIN = 0.12
+INTEGRAL_GAIN = 0.0
+DERIVATIVE_GAIN = 0.0
+DERIVATIVE_LIMIT_DEG_S = 45.0
+INTEGRAL_LIMIT_DEG_S = 2.0
+ERROR_DEADBAND_DEG = 1.0
+MIN_COMMAND_DEG = 0.08
+MAX_STEP_DEG = 0.5
+CONTROL_UPDATE_PERIOD_S = 0.08
+ANGLE_FILTER_ALPHA = 0.10
 # No software angle limits; MAX_STEP_DEG still limits movement per frame.
 YAW_OFFSET_DEG = 0.0
 PITCH_OFFSET_DEG = 0.0

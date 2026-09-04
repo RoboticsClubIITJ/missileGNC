@@ -30,18 +30,29 @@ from gimbal_config import (
     CONTROL_GAIN,
     INTEGRAL_GAIN,
     DERIVATIVE_GAIN,
+    DERIVATIVE_LIMIT_DEG_S,
     INTEGRAL_LIMIT_DEG_S,
     ERROR_DEADBAND_DEG,
+    MIN_COMMAND_DEG,
     MAX_STEP_DEG,
+    CONTROL_UPDATE_PERIOD_S,
     ANGLE_FILTER_ALPHA,
     FX,
     FY,
     CX,
     CY,
+    ORIGIN_MARKER_ID,
+    ORIGIN_CENTER_TOLERANCE_PX,
+    SEARCH_STEP_DEG,
+    ORIGIN_SEARCH_LIMIT_DEG,
     SIMULINK_HOST,
     SIMULINK_PORT,
 )
-from aruco_gimbal_picamera2 import create_aruco_detector, detect_marker_pose
+from aruco_gimbal_picamera2 import (
+    create_aruco_detector,
+    detect_marker_center,
+    detect_marker_pose,
+)
 
 
 # ---------------------------------------------------------------
@@ -110,6 +121,10 @@ class GimbalController:
         incrementally to the current servo angles.
         """
         yaw_error, pitch_error = offset_to_angles(x, y, z)
+        return self.update_direction(yaw_error, pitch_error)
+
+    def update_direction(self, yaw_error, pitch_error):
+        """Apply a pan/tilt correction expressed as angular error."""
         self._filtered_yaw_error = (
             ANGLE_FILTER_ALPHA * yaw_error
             + (1.0 - ANGLE_FILTER_ALPHA) * self._filtered_yaw_error
@@ -120,6 +135,9 @@ class GimbalController:
         )
 
         now = time.perf_counter()
+        elapsed = now - self._previous_update_time
+        if elapsed < CONTROL_UPDATE_PERIOD_S:
+            return 0.0, 0.0, self._current_yaw, self._current_pitch
         dt = max(1.0 / 120.0, min(now - self._previous_update_time, 0.2))
         self._previous_update_time = now
 
@@ -156,22 +174,55 @@ class GimbalController:
         self._drive(self._current_yaw, self._current_pitch)
         return delta_yaw, delta_pitch, self._current_yaw, self._current_pitch
 
+    def reset_control_state(self):
+        """Clear history so a new tracking state starts without a PID kick."""
+        self._filtered_yaw_error = 0.0
+        self._filtered_pitch_error = 0.0
+        self._yaw_integral = 0.0
+        self._pitch_integral = 0.0
+        self._previous_yaw_error = 0.0
+        self._previous_pitch_error = 0.0
+        self._previous_update_time = time.perf_counter()
+
+    def search_step(self, direction):
+        """Move slowly during origin search and return the new servo angles."""
+        self._current_yaw = clamp(
+            self._current_yaw + direction * SEARCH_STEP_DEG,
+            (-ORIGIN_SEARCH_LIMIT_DEG, ORIGIN_SEARCH_LIMIT_DEG),
+        )
+        self._drive(self._current_yaw, self._current_pitch)
+        return self._current_yaw, self._current_pitch
+
+    @property
+    def current_angles(self):
+        return self._current_yaw, self._current_pitch
+
     @staticmethod
     def _pid_correction(error_deg, previous_error_deg, integral, dt):
         if abs(error_deg) <= ERROR_DEADBAND_DEG:
-            return 0.0, integral * 0.9
+            return 0.0, 0.0
 
         integral = clamp(
             integral + error_deg * dt,
             (-INTEGRAL_LIMIT_DEG_S, INTEGRAL_LIMIT_DEG_S),
         )
-        derivative = (error_deg - previous_error_deg) / dt
-        correction = (
+        derivative = clamp(
+            (error_deg - previous_error_deg) / dt,
+            (-DERIVATIVE_LIMIT_DEG_S, DERIVATIVE_LIMIT_DEG_S),
+        )
+        correction_before_limit = (
             CONTROL_GAIN * error_deg
             + INTEGRAL_GAIN * integral
             + DERIVATIVE_GAIN * derivative
         )
-        return clamp(correction, (-MAX_STEP_DEG, MAX_STEP_DEG)), integral
+        correction = clamp(
+            correction_before_limit, (-MAX_STEP_DEG, MAX_STEP_DEG)
+        )
+        if abs(correction) < MIN_COMMAND_DEG:
+            correction = 0.0
+        if correction != correction_before_limit:
+            integral -= error_deg * dt
+        return correction, integral
 
     def _drive(self, yaw_deg, pitch_deg):
         pan_us = angle_to_pulsewidth(yaw_deg, PAN_CENTER_US)
@@ -190,17 +241,46 @@ class GimbalController:
             self.pi.stop()
 
 
-def process_marker(marker_array, gimbal):
+def process_marker(marker_array, gimbal, origin_angles):
     """Process one detection and return servo angles plus measured distance."""
     if marker_array is None:
         return None
+    origin_yaw, origin_pitch = origin_angles
     delta_yaw, delta_pitch, yaw, pitch = gimbal.update(
         marker_array[0], marker_array[1], marker_array[2]
     )
-    return delta_yaw, delta_pitch, yaw, pitch, marker_array[5]
+    relative_yaw = yaw - origin_yaw
+    relative_pitch = pitch - origin_pitch
+    return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[5]
 
 
-def draw_target_hud(frame, marker_array, servo_result, response_ms, fps):
+def pose_relative_to_origin(marker_array, origin_angles):
+    """Express a target pose as a metric vector in the latched origin frame."""
+    if marker_array is None:
+        return None
+
+    origin_yaw, origin_pitch = origin_angles
+    target_yaw, target_pitch = offset_to_angles(
+        marker_array[0], marker_array[1], marker_array[2]
+    )
+    relative_yaw = math.radians(target_yaw - origin_yaw)
+    relative_pitch = math.radians(target_pitch - origin_pitch)
+    distance = marker_array[5]
+    horizontal_distance = distance * math.cos(relative_pitch)
+    x = -horizontal_distance * math.sin(relative_yaw)
+    y = distance * math.sin(relative_pitch)
+    z = horizontal_distance * math.cos(relative_yaw)
+    return [
+        float(x),
+        float(y),
+        float(z),
+        marker_array[3],
+        math.degrees(relative_yaw),
+        float(distance),
+    ]
+
+
+def draw_target_hud(frame, marker_array, servo_result, response_ms, fps, status):
     """Draw a readable targeting HUD over the live camera frame."""
     height, width = frame.shape[:2]
     center_x, center_y = width // 2, height // 2
@@ -236,7 +316,7 @@ def draw_target_hud(frame, marker_array, servo_result, response_ms, fps):
                     cv2.FONT_HERSHEY_DUPLEX, 0.55, accent, 1, cv2.LINE_AA)
         cv2.line(frame, (center_x, center_y), (marker_x, marker_y), accent, 1)
     else:
-        cv2.putText(frame, "SEARCHING FOR TARGET", (20, 38),
+        cv2.putText(frame, status, (20, 38),
                     cv2.FONT_HERSHEY_DUPLEX, 0.62, warning, 1, cv2.LINE_AA)
 
     # Compact telemetry panel keeps the image visible while making timing
@@ -246,7 +326,7 @@ def draw_target_hud(frame, marker_array, servo_result, response_ms, fps):
     cv2.addWeighted(overlay, 0.78, frame, 0.22, 0, frame)
     cv2.putText(frame, "GIMBAL // TRACKING", (26, 38),
                 cv2.FONT_HERSHEY_DUPLEX, 0.55, white, 1, cv2.LINE_AA)
-    cv2.putText(frame, f"STATUS  {'LOCKED' if marker_array is not None else 'SEARCHING'}",
+    cv2.putText(frame, f"STATUS  {status}",
                 (26, 63), cv2.FONT_HERSHEY_SIMPLEX, 0.48,
                 accent if marker_array is not None else warning, 1, cv2.LINE_AA)
     cv2.putText(frame, f"RESPONSE {response_ms:6.1f} ms", (26, 86),
@@ -303,16 +383,61 @@ def main():
     detector, dictionary, parameters, legacy_api = create_aruco_detector()
     gimbal = GimbalController()
     simulink = SimulinkPoseStreamer()
+    origin_locked = False
+    origin_angles = gimbal.current_angles
+    search_direction = 1.0
 
     try:
         while True:
             frame_start = time.perf_counter()
             frame = picam2.capture_array()
-            marker_array, corners, ids = detect_marker_pose(
-                frame, detector, dictionary, parameters, legacy_api
-            )
-            simulink.send(marker_array)
-            servo_result = process_marker(marker_array, gimbal)
+
+            if not origin_locked:
+                origin_center, corners, ids = detect_marker_center(
+                    frame, detector, dictionary, parameters, legacy_api,
+                    ORIGIN_MARKER_ID,
+                )
+                if origin_center is None:
+                    yaw, _ = gimbal.search_step(search_direction)
+                    if abs(yaw) >= ORIGIN_SEARCH_LIMIT_DEG:
+                        search_direction *= -1.0
+                    marker_array = None
+                    servo_result = None
+                    status = "SEARCHING FOR ORIGIN ID 0"
+                else:
+                    center_x, center_y = origin_center
+                    pixel_error_x = center_x - CX
+                    pixel_error_y = center_y - CY
+                    if (
+                        abs(pixel_error_x) <= ORIGIN_CENTER_TOLERANCE_PX
+                        and abs(pixel_error_y) <= ORIGIN_CENTER_TOLERANCE_PX
+                    ):
+                        origin_locked = True
+                        origin_angles = gimbal.current_angles
+                        gimbal.reset_control_state()
+                        marker_array = None
+                        servo_result = None
+                        status = "ORIGIN LOCKED"
+                        print(
+                            f"Origin locked on marker ID {ORIGIN_MARKER_ID}: "
+                            f"yaw={origin_angles[0]:+.2f} deg, "
+                            f"pitch={origin_angles[1]:+.2f} deg"
+                        )
+                    else:
+                        yaw_error = -math.degrees(math.atan2(pixel_error_x, FX))
+                        pitch_error = math.degrees(math.atan2(pixel_error_y, FY))
+                        gimbal.update_direction(yaw_error, pitch_error)
+                        marker_array = None
+                        servo_result = None
+                        status = "CENTERING ORIGIN ID 0"
+            else:
+                marker_array, corners, ids = detect_marker_pose(
+                    frame, detector, dictionary, parameters, legacy_api,
+                    excluded_marker_id=ORIGIN_MARKER_ID,
+                )
+                simulink.send(pose_relative_to_origin(marker_array, origin_angles))
+                servo_result = process_marker(marker_array, gimbal, origin_angles)
+                status = "TRACKING"
 
             response_ms = (time.perf_counter() - frame_start) * 1000.0
             fps = 1000.0 / response_ms if response_ms > 0 else 0.0
@@ -328,7 +453,7 @@ def main():
 
             if ids is not None:
                 cv2.aruco.drawDetectedMarkers(frame, corners, ids)
-            draw_target_hud(frame, marker_array, servo_result, response_ms, fps)
+            draw_target_hud(frame, marker_array, servo_result, response_ms, fps, status)
             cv2.imshow("Gimbal servo control", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break

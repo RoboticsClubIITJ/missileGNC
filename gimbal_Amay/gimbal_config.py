@@ -207,19 +207,29 @@ US_PER_DEGREE = 8.0
 # are filtered, reduced by CONTROL_GAIN, ignored inside the deadband, and
 # limited per camera frame.
 # PID gains operate on the filtered angular error in degrees.
-CONTROL_GAIN = 0.75
-INTEGRAL_GAIN = 0.03
-DERIVATIVE_GAIN = 0.08
-INTEGRAL_LIMIT_DEG_S = 8.0
-ERROR_DEADBAND_DEG = 0.20
-MAX_STEP_DEG = 5.0
-ANGLE_FILTER_ALPHA = 0.60
+CONTROL_GAIN = 0.12
+INTEGRAL_GAIN = 0.0
+DERIVATIVE_GAIN = 0.0
+DERIVATIVE_LIMIT_DEG_S = 45.0
+INTEGRAL_LIMIT_DEG_S = 2.0
+ERROR_DEADBAND_DEG = 1.0
+MIN_COMMAND_DEG = 0.08
+MAX_STEP_DEG = 0.5
+CONTROL_UPDATE_PERIOD_S = 0.08
+ANGLE_FILTER_ALPHA = 0.10
 
 # Detection performance controls. Lower DETECTION_SCALE is faster but makes
 # very small markers harder to detect; 0.60 is a fast balanced setting.
 DETECTION_SCALE = 0.60
 CORNER_REFINE_ITERATIONS = 10
 CORNER_REFINE_EPSILON = 0.01
+
+# Marker 0 is a one-time, size-independent origin reference. The search
+# controller uses image-space error until this marker is centered.
+ORIGIN_MARKER_ID = 0
+ORIGIN_CENTER_TOLERANCE_PX = 18
+SEARCH_STEP_DEG = 2.0
+ORIGIN_SEARCH_LIMIT_DEG = 90.0
 
 # No software angle limits: the configured per-frame step limit still reduces
 # sudden motion, but the controller can follow targets across the full range.
