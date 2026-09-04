@@ -278,29 +278,31 @@ def process_marker(marker_array, gimbal, origin_angles):
     return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[5]
 
 def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_pose):
-    """Express a target pose as a metric vector in the latched origin frame."""
+    """Express the target center relative to marker 0 in the origin frame."""
     if marker_array is None:
         return None
 
     origin_yaw, origin_pitch = origin_angles
     current_yaw, current_pitch = current_angles
-    target_yaw_error, target_pitch_error = offset_to_angles(
-        marker_array[0], marker_array[1], marker_array[2]
-    )
-    relative_yaw = math.radians(current_yaw + target_yaw_error - origin_yaw)
-    relative_pitch = math.radians(current_pitch + target_pitch_error - origin_pitch)
-    distance = marker_array[5]
-    horizontal_distance = distance * math.cos(relative_pitch)
-    x = -horizontal_distance * math.sin(relative_yaw)
-    y = distance * math.sin(relative_pitch)
-    z = horizontal_distance * math.cos(relative_yaw)
+    relative_yaw = math.radians(current_yaw - origin_yaw)
+    relative_pitch = math.radians(current_pitch - origin_pitch)
+
+    cy, sy = math.cos(relative_yaw), math.sin(relative_yaw)
+    cp, sp = math.cos(relative_pitch), math.sin(relative_pitch)
+    target_x, target_y, target_z = marker_array[:3]
+
+    # Rotate the camera-frame measurement back into the latched-origin frame.
+    rotated_x = cy * target_x - sy * target_z
+    rotated_y = cp * target_y - sp * (sy * target_x + cy * target_z)
+    rotated_z = sp * target_y + cp * (sy * target_x + cy * target_z)
+
     return [
-        float(x - origin_pose[0]),
-        float(y - origin_pose[1]),
-        float(z - origin_pose[2]),
+        float(rotated_x - origin_pose[0]),
+        float(rotated_y - origin_pose[1]),
+        float(rotated_z - origin_pose[2]),
         marker_array[3],
-        math.degrees(relative_yaw),
-        float(distance),
+        math.degrees(math.atan2(-rotated_x, rotated_z)),
+        float(marker_array[5]),
     ]
 def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     """Express a target center in the origin marker's coordinate frame."""
