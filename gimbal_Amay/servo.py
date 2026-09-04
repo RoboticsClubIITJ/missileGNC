@@ -516,7 +516,7 @@ def main():
                         servo_result = None
                         status = "CENTERING ORIGIN ID 0"
             else:
-                marker_array, target_rotation, corners, ids = detect_marker_pose(
+                marker_array, _, corners, ids = detect_marker_pose(
                     frame, detector, dictionary, parameters, legacy_api,
                     excluded_marker_id=ORIGIN_MARKER_ID,
                     return_rotation=True,
@@ -526,14 +526,9 @@ def main():
                     required_marker_id=ORIGIN_MARKER_ID,
                     return_rotation=True,
                 )
-                camera_angles = gimbal.current_angles
                 if marker_array is not None and origin_marker is not None:
                     relative_pose = pose_relative_to_marker(
                         marker_array, origin_marker, origin_rotation
-                    )
-                elif marker_array is not None:
-                    relative_pose = pose_relative_to_origin(
-                        marker_array, origin_angles, camera_angles, origin_pose
                     )
                 else:
                     relative_pose = None
@@ -558,7 +553,7 @@ def main():
                     ])
                     coordinates_file.flush()
                 servo_result = process_marker(marker_array, gimbal, origin_angles)
-                status = "TRACKING"
+                status = "TRACKING" if origin_marker is not None else "ORIGIN LOST"
 
                 if packet_interval_ms is not None:
                     print(
