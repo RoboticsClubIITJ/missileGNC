@@ -4,6 +4,8 @@ import socket
 import struct
 import csv
 import os
+import threading
+from collections import deque
 import cv2
 import numpy as np
 
@@ -453,6 +455,55 @@ class SimulinkPoseStreamer:
         self.socket.close()
 
 
+class FixedRateSender:
+    """Drain a bounded queue of poses at a fixed period, independent of
+    however irregularly the detection loop produces them.
+
+    The queue is sized generously (default 200) for a short (~10s) run so
+    it should never fill given this rig's observed detection rate; poses
+    are pushed by the detection loop and popped here on a strict clock.
+    If the queue runs dry (a detection stall), the last popped value is
+    resent so the receiver keeps getting a packet on schedule.
+    """
+
+    def __init__(self, simulink, period_s=0.05, maxlen=200):
+        self.simulink = simulink
+        self.period_s = period_s
+        self.queue = deque(maxlen=maxlen)
+        self.lock = threading.Lock()
+        self._last_sent_pose = None
+        self._stop_event = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def push(self, pose):
+        with self.lock:
+            self.queue.append(pose)
+
+    def stop(self):
+        self._stop_event.set()
+        self._thread.join(timeout=1.0)
+
+    def _run(self):
+        next_tick = time.perf_counter()
+        while not self._stop_event.is_set():
+            with self.lock:
+                pose = self.queue.popleft() if self.queue else None
+            if pose is not None:
+                self._last_sent_pose = pose
+            if self._last_sent_pose is not None:
+                self.simulink.send(self._last_sent_pose)
+            next_tick += self.period_s
+            sleep_for = next_tick - time.perf_counter()
+            if sleep_for > 0:
+                time.sleep(sleep_for)
+            else:
+                # Fell behind schedule; resync instead of accumulating drift.
+                next_tick = time.perf_counter()
+
+
 def main():
     if Picamera2 is None:
         raise RuntimeError(
@@ -471,6 +522,8 @@ def main():
     detector, dictionary, parameters, legacy_api = create_aruco_detector()
     gimbal = GimbalController()
     simulink = SimulinkPoseStreamer()
+    sender = FixedRateSender(simulink, period_s=0.05, maxlen=200)
+    sender.start()
     origin_pose = None
     coordinates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coordinates.csv")
     coordinates_file = open(coordinates_path, "w", newline="")
@@ -555,15 +608,11 @@ def main():
                 )
                 if marker_array is None:
                     previous_valid_pose = None
-                    packet_interval_ms = None
-                    cumulative_average_ms = None
                     servo_result = None
                     relative_pose = None
                     status = "NO TARGET"
                 elif not pose_has_valid_step(marker_array, previous_valid_pose):
                     marker_array = None
-                    packet_interval_ms = None
-                    cumulative_average_ms = None
                     servo_result = None
                     relative_pose = None
                     status = "REJECTED POSE OUTLIER"
@@ -580,7 +629,7 @@ def main():
                         marker_array, origin_angles, camera_angles, origin_pose
                     )
                     print(f"x={relative_pose[0]:+.6f} y={relative_pose[1]:+.6f}")
-                    packet_interval_ms, cumulative_average_ms = simulink.send(relative_pose)
+                    sender.push(relative_pose)
                     servo_result = process_marker(marker_array, gimbal, origin_angles)
                     origin_values = origin_pose[:3]
                     transform_source = "latched_origin"
@@ -605,10 +654,10 @@ def main():
                     coordinates_file.flush()
                     status = "TRACKING"
 
-                if packet_interval_ms is not None:
+                if simulink.packet_interval_ms is not None:
                     print(
-                        f"Simulink packet interval: {packet_interval_ms:.2f} ms | "
-                        f"cumulative average: {cumulative_average_ms:.2f} ms"
+                        f"Simulink packet interval: {simulink.packet_interval_ms:.2f} ms | "
+                        f"cumulative average: {simulink.cumulative_average_ms:.2f} ms"
                     )
 
             response_ms = (time.perf_counter() - frame_start) * 1000.0
@@ -631,6 +680,7 @@ def main():
                 break
     finally:
         gimbal.stop()
+        sender.stop()
         simulink.close()
         coordinates_file.close()
         picam2.stop()

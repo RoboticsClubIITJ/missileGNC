@@ -25,7 +25,8 @@ Pan/tilt servos       GimbalUDPReceiver.m
 
 `servo.py` is the normal runtime entry point. It first sweeps the gimbal until
 marker ID `0` is centered, latches that position as a permanent origin, and
-then performs detection, servo control, and UDP transmission in one process.
+then performs detection and servo control while a separate sender thread
+transmits the latest valid pose to Simulink at a fixed 20 Hz rate.
 
 ## Quick Start Checklist
 
@@ -44,7 +45,7 @@ Do not start with the servos attached to the full mechanical assembly. First tes
 
 ## Files
 
-- `servo.py`: Main runtime program. Reads camera frames, calls the ArUco detector, calculates servo angles, drives the servos, and sends UDP packets.
+- `servo.py`: Main runtime program. Reads camera frames, calls the ArUco detector, calculates servo angles, drives the servos, logs pose timing, and queues poses for the fixed-rate UDP sender.
 - `aruco_gimbal_picamera2.py`: Reusable camera and ArUco detection functions. The important public functions are `create_aruco_detector()` and `detect_marker_pose()`.
 - `gimbal_config.py`: Shared camera calibration, marker size, optional distance diagnostics, servo settings, and Simulink network settings.
 - `calibrate_camera_picamera2.py`: Captures ChArUco calibration images and creates `camera_calibration.npz`.
@@ -62,24 +63,33 @@ When `servo.py` is running, the following sequence repeats for every camera fram
 3. `aruco_gimbal_picamera2.py` searches for markers from the `DICT_6X6_250` dictionary.
 4. Before origin lock, only marker ID `0` is used. Its image center is aligned without `solvePnP()`, so its physical size is irrelevant.
 5. Once ID `0` is centered, the current pan/tilt angles are latched permanently as the origin. ID `0` is excluded from subsequent target tracking.
-6. Target markers are passed to OpenCV `solvePnP()` together with `MARKER_SIZE` and camera calibration.
-7. `solvePnP()` returns the target translation `(x, y, z)` in meters. The target is converted to coordinates relative to the latched origin before UDP transmission.
-6. The detector pose contains four values:
+5. Target markers are passed to OpenCV `solvePnP()` together with `MARKER_SIZE` and camera calibration.
+6. `solvePnP()` returns the target translation `(x, y, z)` in meters. The target is converted to coordinates relative to the latched origin before transmission.
+7. The detector pose contains four values:
 
    ```text
    [x, y, z, distance]
    ```
 
-7. Before transmission, the target vector is rotated from the current camera orientation back into the latched origin orientation, then the stored ID `0` origin vector is subtracted. ID `0` is never transmitted.
-8. The resulting six-value pose is sent to MATLAB as a UDP datagram.
-9. The `x` and `y` values are passed to `GimbalController`.
-10. The controller calculates the desired pan and tilt angles, clamps them to the configured limits, converts them to pulse widths, and commands the servos through `pigpio`.
-11. The camera frame is displayed. Pressing `q` exits the loop and releases the hardware and network resources.
+8. Before transmission, the target vector is rotated from the current camera orientation back into the latched origin orientation, then the stored ID `0` origin vector is subtracted. ID `0` is never transmitted. This transformed result is arranged as the six-value UDP pose.
+9. The valid six-value pose is pushed into a bounded queue. A `FixedRateSender` thread removes queued poses and sends one packet every `0.05` seconds, independently of camera detection time.
+10. If detection temporarily stalls, the sender repeats the last valid pose so the receiver continues to receive packets on schedule. Newer detections replace older queued poses when the queue is full.
+11. The `x` and `y` values are passed to `GimbalController`.
+12. The controller calculates the desired pan and tilt angles, clamps them to the configured limits, converts them to pulse widths, and commands the servos through `pigpio`.
+13. The camera frame is displayed. Pressing `q` exits the loop and stops the sender thread before releasing the hardware and network resources.
 
-After origin lock, if no target marker is detected, no UDP pose packet is sent
-and the tracking controller is not updated for that frame. The MATLAB receiver
-keeps its previous pose and reports `isNew = false`. Before origin lock, the
-gimbal continues its slow pan/tilt raster search for marker ID `0`.
+After origin lock, if no target marker is detected, the tracking controller is
+not updated for that frame, but the sender continues transmitting the last valid
+pose at 20 Hz. Before origin lock, no pose is queued and the gimbal continues
+its slow pan/tilt raster search for marker ID `0`.
+
+The runtime rejects invalid or implausibly large frame-to-frame pose jumps using
+`pose_has_valid_step()`. A rejected pose is not sent or used for servo control.
+
+The detector currently returns a four-element pose, so the transformed-pose
+construction must use those four fields consistently before queueing a packet.
+If `pose_relative_to_origin()` is changed, keep its output order aligned with
+the UDP packet format below.
 
 ## Hardware and Software
 
@@ -305,7 +315,12 @@ If the gimbal moves in the wrong direction, correct the sign or the relevant `YA
 
 ## UDP Packet Format
 
-For every valid marker detection, `servo.py` sends one UDP datagram to `SIMULINK_HOST:SIMULINK_PORT`.
+Once the first valid target pose has been detected, `servo.py` sends one UDP
+datagram every `0.05` seconds (20 Hz) to `SIMULINK_HOST:SIMULINK_PORT`.
+Transmission runs in a separate thread, so camera detection and OpenCV display
+latency no longer directly determine the packet interval. The sender has a
+bounded queue of 200 poses and resends the most recent pose when the queue is
+empty.
 
 The payload is:
 
@@ -325,7 +340,27 @@ This is:
 - one little-endian 32-bit unsigned sequence number: 4 bytes
 - total packet size: 52 bytes
 
-The sequence number increments for each packet and wraps after `0xFFFFFFFF`.
+The sequence number increments for each transmitted packet, including repeated
+poses, and wraps after `0xFFFFFFFF`. The sequence number therefore measures
+packets sent, not newly detected camera poses.
+
+## Timing and CSV Log
+
+`servo.py` rewrites `coordinates.csv` at startup and records one row for each
+accepted camera pose. The columns include:
+
+- `timestamp`: wall-clock time when the pose was accepted
+- `frame_gap_s`: time since the previous accepted pose was logged
+- `raw_x_m`, `raw_y_m`, `raw_z_m`: camera-frame pose
+- `relative_x_m`, `relative_y_m`, `relative_z_m`: pose relative to the latched origin
+- `relative_yaw_deg`, `relative_pitch_deg`: relative bearing angles
+- `origin_x_m`, `origin_y_m`, `origin_z_m`: latched origin pose
+- `transform_source`: currently `latched_origin`
+
+`frame_gap_s` describes ArUco detection/logging timing. It should not be used
+as the UDP packet interval: packets are scheduled independently by the sender
+thread at 20 Hz. The terminal's `Simulink packet interval` message measures the
+actual intervals between UDP sends.
 
 ## MATLAB and Simulink Setup
 
