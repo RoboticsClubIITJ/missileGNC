@@ -285,7 +285,7 @@ def process_marker(marker_array, gimbal, origin_angles):
     )
     relative_yaw = yaw - origin_yaw
     relative_pitch = pitch - origin_pitch
-    return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[5]
+    return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[3]
 
 def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_pose):
     """Express the target center relative to marker 0 in the origin frame."""
@@ -312,7 +312,7 @@ def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_
         float(rotated_z - origin_pose[2]),
         marker_array[3],
         math.degrees(math.atan2(-rotated_x, rotated_z)),
-        float(marker_array[5]),
+        float(marker_array[3]),
     ]
 def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     """Express a target center in the origin marker's coordinate frame."""
@@ -321,7 +321,7 @@ def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     x, camera_y, marker_z = marker_delta.tolist()
     y = camera_y
     z = -marker_z
-    distance = target_pose[5]
+    distance = target_pose[3]
     horizontal_distance = math.hypot(x, z)
     return [
         float(x),
