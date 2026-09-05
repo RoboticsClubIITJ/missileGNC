@@ -30,7 +30,6 @@ from gimbal_config import (
     PITCH_OFFSET_DEG,
     SERVO_MIN_PULSE_US,
     SERVO_MAX_PULSE_US,
-    STARTUP_HOLD_S,
     CONTROL_GAIN,
     INTEGRAL_GAIN,
     DERIVATIVE_GAIN,
@@ -284,7 +283,7 @@ def process_marker(marker_array, gimbal, origin_angles):
     )
     relative_yaw = yaw - origin_yaw
     relative_pitch = pitch - origin_pitch
-    return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[3]
+    return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[5]
 
 def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_pose):
     """Express the target center relative to marker 0 in the origin frame."""
@@ -311,7 +310,7 @@ def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_
         float(rotated_z - origin_pose[2]),
         marker_array[3],
         math.degrees(math.atan2(-rotated_x, rotated_z)),
-        float(marker_array[3]),
+        float(marker_array[5]),
     ]
 def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     """Express a target center in the origin marker's coordinate frame."""
@@ -320,7 +319,7 @@ def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     x, camera_y, marker_z = marker_delta.tolist()
     y = camera_y
     z = -marker_z
-    distance = target_pose[3]
+    distance = target_pose[5]
     horizontal_distance = math.hypot(x, z)
     return [
         float(x),
@@ -461,10 +460,6 @@ def main():
             "The gimbal servo script requires a Raspberry Pi camera stack."
         )
 
-    gimbal = GimbalController()
-    print(f"Servos centered at mean position; holding for {STARTUP_HOLD_S:.1f} seconds...")
-    time.sleep(STARTUP_HOLD_S)
-
     picam2 = Picamera2()
     camera_config = picam2.create_video_configuration(
         main={"size": (640, 480), "format": "RGB888"}
@@ -474,6 +469,7 @@ def main():
     time.sleep(2)
 
     detector, dictionary, parameters, legacy_api = create_aruco_detector()
+    gimbal = GimbalController()
     simulink = SimulinkPoseStreamer()
     origin_pose = None
     coordinates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coordinates.csv")
@@ -555,6 +551,7 @@ def main():
                 marker_array, _, corners, ids = detect_marker_pose(
                     frame, detector, dictionary, parameters, legacy_api,
                     excluded_marker_id=ORIGIN_MARKER_ID,
+                    return_rotation=True,
                 )
                 if marker_array is None:
                     previous_valid_pose = None
