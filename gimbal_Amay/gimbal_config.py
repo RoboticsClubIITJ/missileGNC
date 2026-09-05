@@ -202,6 +202,9 @@ TILT_GPIO = 19
 PAN_CENTER_US = 1500
 TILT_CENTER_US = 1500
 US_PER_DEGREE = 8.0
+SERVO_MIN_PULSE_US = 1000
+SERVO_MAX_PULSE_US = 2000
+STARTUP_HOLD_S = 5.0
 
 # Feedback tuning for fast tracking without uncontrolled jumps. Corrections
 # are filtered, reduced by CONTROL_GAIN, ignored inside the deadband, and
@@ -234,10 +237,9 @@ SEARCH_UPDATE_PERIOD_S = 0.10
 ORIGIN_SEARCH_LIMIT_DEG = 60.0
 ORIGIN_SEARCH_TILT_LIMIT_DEG = 45.0
 
-# No software angle limits: the configured per-frame step limit still reduces
-# sudden motion, but the controller can follow targets across the full range.
-PAN_LIMIT_DEG = (-float("inf"), float("inf"))
-TILT_LIMIT_DEG = (-float("inf"), float("inf"))
+# Keep commanded motion inside the tested mechanical search envelope.
+PAN_LIMIT_DEG = (-60.0, 60.0)
+TILT_LIMIT_DEG = (-45.0, 45.0)
 
 # Keep zero offsets at neutral until the physical axis direction is checked.
 YAW_OFFSET_DEG = 0.0

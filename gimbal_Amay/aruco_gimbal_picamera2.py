@@ -136,6 +136,7 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
     distance = math.sqrt(x ** 2 + y ** 2 + z ** 2)
     pose = [float(x), float(y), float(z), float(distance)]
     if return_rotation:
+        rotation_matrix, _ = cv2.Rodrigues(rvec)
         return pose, rotation_matrix, corners, ids
     return pose, corners, ids
 

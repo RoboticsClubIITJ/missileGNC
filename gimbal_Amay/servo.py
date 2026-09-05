@@ -28,6 +28,9 @@ from gimbal_config import (
     TILT_LIMIT_DEG,
     YAW_OFFSET_DEG,
     PITCH_OFFSET_DEG,
+    SERVO_MIN_PULSE_US,
+    SERVO_MAX_PULSE_US,
+    STARTUP_HOLD_S,
     CONTROL_GAIN,
     INTEGRAL_GAIN,
     DERIVATIVE_GAIN,
@@ -249,8 +252,14 @@ class GimbalController:
         return correction, integral
 
     def _drive(self, yaw_deg, pitch_deg):
-        pan_us = angle_to_pulsewidth(yaw_deg, PAN_CENTER_US)
-        tilt_us = angle_to_pulsewidth(pitch_deg, TILT_CENTER_US)
+        pan_us = clamp(
+            angle_to_pulsewidth(yaw_deg, PAN_CENTER_US),
+            (SERVO_MIN_PULSE_US, SERVO_MAX_PULSE_US),
+        )
+        tilt_us = clamp(
+            angle_to_pulsewidth(pitch_deg, TILT_CENTER_US),
+            (SERVO_MIN_PULSE_US, SERVO_MAX_PULSE_US),
+        )
 
         if self.pi is not None:
             self.pi.set_servo_pulsewidth(PAN_GPIO, pan_us)
@@ -275,7 +284,7 @@ def process_marker(marker_array, gimbal, origin_angles):
     )
     relative_yaw = yaw - origin_yaw
     relative_pitch = pitch - origin_pitch
-    return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[5]
+    return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[3]
 
 def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_pose):
     """Express the target center relative to marker 0 in the origin frame."""
@@ -302,7 +311,7 @@ def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_
         float(rotated_z - origin_pose[2]),
         marker_array[3],
         math.degrees(math.atan2(-rotated_x, rotated_z)),
-        float(marker_array[5]),
+        float(marker_array[3]),
     ]
 def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     """Express a target center in the origin marker's coordinate frame."""
@@ -311,7 +320,7 @@ def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     x, camera_y, marker_z = marker_delta.tolist()
     y = camera_y
     z = -marker_z
-    distance = target_pose[5]
+    distance = target_pose[3]
     horizontal_distance = math.hypot(x, z)
     return [
         float(x),
@@ -328,6 +337,23 @@ def pose_has_valid_depth(marker_array, previous_z, max_depth_step=0.15):
     if marker_array is None or not math.isfinite(marker_array[2]) or marker_array[2] <= 0:
         return False
     return previous_z is None or abs(marker_array[2] - previous_z) <= max_depth_step
+
+
+def pose_has_valid_step(marker_array, previous_pose, max_step_m=0.15):
+    """Reject isolated solvePnP x/y/z spikes, not just depth spikes.
+
+    A single bad corner-detection can move x or y by several cm in one
+    frame while z looks fine; pose_has_valid_depth alone lets that through.
+    This bounds the full 3D displacement since the last accepted pose.
+    """
+    if marker_array is None or not all(math.isfinite(v) for v in marker_array[:3]):
+        return False
+    if marker_array[2] <= 0:
+        return False
+    if previous_pose is None:
+        return True
+    step = math.dist(marker_array[:3], previous_pose[:3])
+    return step <= max_step_m
 
 
 def draw_target_hud(frame, marker_array, servo_result, response_ms, fps, status):
@@ -435,6 +461,10 @@ def main():
             "The gimbal servo script requires a Raspberry Pi camera stack."
         )
 
+    gimbal = GimbalController()
+    print(f"Servos centered at mean position; holding for {STARTUP_HOLD_S:.1f} seconds...")
+    time.sleep(STARTUP_HOLD_S)
+
     picam2 = Picamera2()
     camera_config = picam2.create_video_configuration(
         main={"size": (640, 480), "format": "RGB888"}
@@ -444,21 +474,21 @@ def main():
     time.sleep(2)
 
     detector, dictionary, parameters, legacy_api = create_aruco_detector()
-    gimbal = GimbalController()
     simulink = SimulinkPoseStreamer()
     origin_pose = None
     coordinates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coordinates.csv")
     coordinates_file = open(coordinates_path, "w", newline="")
     coordinates_writer = csv.writer(coordinates_file)
     coordinates_writer.writerow([
-        "timestamp", "raw_x_m", "raw_y_m", "raw_z_m",
+        "timestamp", "frame_gap_s", "raw_x_m", "raw_y_m", "raw_z_m",
         "relative_x_m", "relative_y_m", "relative_z_m",
         "relative_yaw_deg", "relative_pitch_deg",
         "origin_x_m", "origin_y_m", "origin_z_m", "transform_source",
     ])
     coordinates_file.flush()
     origin_locked = False
-    previous_valid_z = None
+    previous_valid_pose = None
+    previous_logged_timestamp = None
     origin_angles = gimbal.current_angles
     search_yaw_direction = 1.0
     search_pitch_direction = -1.0
@@ -525,15 +555,15 @@ def main():
                 marker_array, _, corners, ids = detect_marker_pose(
                     frame, detector, dictionary, parameters, legacy_api,
                     excluded_marker_id=ORIGIN_MARKER_ID,
-                    return_rotation=True,
                 )
                 if marker_array is None:
+                    previous_valid_pose = None
                     packet_interval_ms = None
                     cumulative_average_ms = None
                     servo_result = None
                     relative_pose = None
                     status = "NO TARGET"
-                elif not pose_has_valid_depth(marker_array, previous_valid_z):
+                elif not pose_has_valid_step(marker_array, previous_valid_pose):
                     marker_array = None
                     packet_interval_ms = None
                     cumulative_average_ms = None
@@ -541,7 +571,13 @@ def main():
                     relative_pose = None
                     status = "REJECTED POSE OUTLIER"
                 else:
-                    previous_valid_z = marker_array[2]
+                    previous_valid_pose = tuple(marker_array[:3])
+                    now = time.time()
+                    frame_gap_s = (
+                        now - previous_logged_timestamp
+                        if previous_logged_timestamp is not None else None
+                    )
+                    previous_logged_timestamp = now
                     camera_angles = gimbal.current_angles
                     relative_pose = pose_relative_to_origin(
                         marker_array, origin_angles, camera_angles, origin_pose
@@ -559,7 +595,8 @@ def main():
                         relative_yaw_deg = ""
                         relative_pitch_deg = ""
                     coordinates_writer.writerow([
-                        f"{time.time():.6f}",
+                        f"{now:.6f}",
+                        f"{frame_gap_s:.6f}" if frame_gap_s is not None else "",
                         f"{marker_array[0]:.6f}", f"{marker_array[1]:.6f}",
                         f"{marker_array[2]:.6f}",
                         *(f"{value:.6f}" if value is not None else "" for value in relative_values),
