@@ -466,7 +466,7 @@ class FixedRateSender:
     resent so the receiver keeps getting a packet on schedule.
     """
 
-    def __init__(self, simulink, period_s=0.01, maxlen=2000):
+    def __init__(self, simulink, period_s=0.05, maxlen=2000):
         self.simulink = simulink
         self.period_s = period_s
         self.queue = deque(maxlen=maxlen)
