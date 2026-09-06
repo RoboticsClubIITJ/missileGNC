@@ -285,7 +285,7 @@ def process_marker(marker_array, gimbal, origin_angles):
     )
     relative_yaw = yaw - origin_yaw
     relative_pitch = pitch - origin_pitch
-    return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[3]
+    return delta_yaw, delta_pitch, relative_yaw, relative_pitch, marker_array[5]
 
 def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_pose):
     """Express the target center relative to marker 0 in the origin frame."""
@@ -312,7 +312,7 @@ def pose_relative_to_origin(marker_array, origin_angles, current_angles, origin_
         float(rotated_z - origin_pose[2]),
         marker_array[3],
         math.degrees(math.atan2(-rotated_x, rotated_z)),
-        float(marker_array[3]),
+        float(marker_array[5]),
     ]
 def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     """Express a target center in the origin marker's coordinate frame."""
@@ -321,7 +321,7 @@ def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
     x, camera_y, marker_z = marker_delta.tolist()
     y = camera_y
     z = -marker_z
-    distance = target_pose[3]
+    distance = target_pose[5]
     horizontal_distance = math.hypot(x, z)
     return [
         float(x),
@@ -331,6 +331,23 @@ def pose_relative_to_marker(target_pose, origin_pose, origin_rotation):
         math.degrees(math.atan2(-x, z)),
         float(distance),
     ]
+
+
+def project_to_board_plane(origin_relative_xyz, origin_rotation):
+    """Re-express an already origin-relative 3D vector in the origin
+    marker's own local axes (the board's plane), instead of the camera's.
+
+    origin_relative_xyz must already be the output of
+    pose_relative_to_origin()[:3] (camera-rotation-compensated, origin
+    subtracted) — this function does not do that compensation itself, it
+    only removes the *board's* tilt on top of it. u/v are the two in-plane
+    board coordinates (what should trace a clean circle); w is the
+    out-of-plane residual, useful as a detection-quality sanity check
+    (should stay near zero if the target is actually on the board).
+    """
+    board_frame = origin_rotation.T @ np.asarray(origin_relative_xyz)
+    board_u, board_v, board_w = board_frame.tolist()
+    return float(board_u), float(board_v), float(board_w)
 
 
 def pose_has_valid_depth(marker_array, previous_z, max_depth_step=0.15):
@@ -466,7 +483,7 @@ class FixedRateSender:
     resent so the receiver keeps getting a packet on schedule.
     """
 
-    def __init__(self, simulink, period_s=0.05, maxlen=2000):
+    def __init__(self, simulink, period_s=0.05, maxlen=200):
         self.simulink = simulink
         self.period_s = period_s
         self.queue = deque(maxlen=maxlen)
@@ -525,6 +542,7 @@ def main():
     sender = FixedRateSender(simulink, period_s=0.05, maxlen=200)
     sender.start()
     origin_pose = None
+    origin_rotation = None
     coordinates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coordinates.csv")
     coordinates_file = open(coordinates_path, "w", newline="")
     coordinates_writer = csv.writer(coordinates_file)
@@ -533,6 +551,7 @@ def main():
         "relative_x_m", "relative_y_m", "relative_z_m",
         "relative_yaw_deg", "relative_pitch_deg",
         "origin_x_m", "origin_y_m", "origin_z_m", "transform_source",
+        "board_u_m", "board_v_m", "board_w_m",
     ])
     coordinates_file.flush()
     origin_locked = False
@@ -571,9 +590,10 @@ def main():
                         abs(pixel_error_x) <= ORIGIN_CENTER_TOLERANCE_PX
                         and abs(pixel_error_y) <= ORIGIN_CENTER_TOLERANCE_PX
                     ):
-                        origin_pose, _, _ = detect_marker_pose(
+                        origin_pose, origin_rotation, _, _ = detect_marker_pose(
                             frame, detector, dictionary, parameters, legacy_api,
                             required_marker_id=ORIGIN_MARKER_ID,
+                            return_rotation=True,
                         )
                         if origin_pose is not None:
                             origin_locked = True
@@ -628,8 +648,15 @@ def main():
                     relative_pose = pose_relative_to_origin(
                         marker_array, origin_angles, camera_angles, origin_pose
                     )
-                    print(f"x={relative_pose[0]:+.6f} y={relative_pose[1]:+.6f}")
-                    sender.push(relative_pose)
+                    board_u, board_v, board_w = project_to_board_plane(
+                        relative_pose[:3], origin_rotation
+                    )
+                    board_packet = [
+                        board_u, board_v, board_w,
+                        relative_pose[3], relative_pose[4], relative_pose[5],
+                    ]
+                    print(f"x={board_u:+.6f} y={board_v:+.6f} (board-plane; w={board_w:+.4f})")
+                    sender.push(board_packet)
                     servo_result = process_marker(marker_array, gimbal, origin_angles)
                     origin_values = origin_pose[:3]
                     transform_source = "latched_origin"
@@ -650,6 +677,7 @@ def main():
                         relative_pitch_deg,
                         *(f"{value:.6f}" if value is not None else "" for value in origin_values),
                         transform_source,
+                        f"{board_u:.6f}", f"{board_v:.6f}", f"{board_w:.6f}",
                     ])
                     coordinates_file.flush()
                     status = "TRACKING"
