@@ -350,6 +350,34 @@ def project_to_board_plane(origin_relative_xyz, origin_rotation):
     return float(board_u), float(board_v), float(board_w)
 
 
+class ExponentialSmoother:
+    """Causal (past-only) low-pass filter for live values sent onward.
+
+    smoothed = alpha * new_value + (1 - alpha) * smoothed_previous
+
+    Unlike Savitzky-Golay (which needs future samples in its window and
+    is only usable after the fact on a recorded CSV), this only ever
+    looks backward, so it's safe to run in the live loop. Lower alpha =
+    smoother but more lag; higher alpha = less lag but less smoothing.
+    Call reset() whenever tracking is lost/reacquired so the filter
+    doesn't blend a stale value across a real gap.
+    """
+
+    def __init__(self, alpha=0.3):
+        self.alpha = alpha
+        self._state = None
+
+    def update(self, value):
+        if self._state is None:
+            self._state = value
+        else:
+            self._state = self.alpha * value + (1.0 - self.alpha) * self._state
+        return self._state
+
+    def reset(self):
+        self._state = None
+
+
 def pose_has_valid_depth(marker_array, previous_z, max_depth_step=0.15):
     """Reject isolated solvePnP depth spikes without changing valid poses."""
     if marker_array is None or not math.isfinite(marker_array[2]) or marker_array[2] <= 0:
@@ -552,6 +580,7 @@ def main():
         "relative_yaw_deg", "relative_pitch_deg",
         "origin_x_m", "origin_y_m", "origin_z_m", "transform_source",
         "board_u_m", "board_v_m", "board_w_m",
+        "board_u_smooth_m", "board_v_smooth_m",
     ])
     coordinates_file.flush()
     origin_locked = False
@@ -560,6 +589,8 @@ def main():
     origin_angles = gimbal.current_angles
     search_yaw_direction = 1.0
     search_pitch_direction = -1.0
+    board_u_smoother = ExponentialSmoother(alpha=0.3)
+    board_v_smoother = ExponentialSmoother(alpha=0.3)
 
     try:
         while True:
@@ -628,6 +659,8 @@ def main():
                 )
                 if marker_array is None:
                     previous_valid_pose = None
+                    board_u_smoother.reset()
+                    board_v_smoother.reset()
                     servo_result = None
                     relative_pose = None
                     status = "NO TARGET"
@@ -651,11 +684,16 @@ def main():
                     board_u, board_v, board_w = project_to_board_plane(
                         relative_pose[:3], origin_rotation
                     )
+                    board_u_smooth = board_u_smoother.update(board_u)
+                    board_v_smooth = board_v_smoother.update(board_v)
                     board_packet = [
-                        board_u, board_v, board_w,
+                        board_u_smooth, board_v_smooth, board_w,
                         relative_pose[3], relative_pose[4], relative_pose[5],
                     ]
-                    print(f"x={board_u:+.6f} y={board_v:+.6f} (board-plane; w={board_w:+.4f})")
+                    print(
+                        f"x={board_u_smooth:+.6f} y={board_v_smooth:+.6f} "
+                        f"(board-plane, smoothed; raw x={board_u:+.6f} y={board_v:+.6f}; w={board_w:+.4f})"
+                    )
                     sender.push(board_packet)
                     servo_result = process_marker(marker_array, gimbal, origin_angles)
                     origin_values = origin_pose[:3]
@@ -678,6 +716,7 @@ def main():
                         *(f"{value:.6f}" if value is not None else "" for value in origin_values),
                         transform_source,
                         f"{board_u:.6f}", f"{board_v:.6f}", f"{board_w:.6f}",
+                        f"{board_u_smooth:.6f}", f"{board_v_smooth:.6f}",
                     ])
                     coordinates_file.flush()
                     status = "TRACKING"
