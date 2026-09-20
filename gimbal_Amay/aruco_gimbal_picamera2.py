@@ -134,9 +134,13 @@ def detect_marker_pose(frame, detector, dictionary, parameters, legacy_api,
         return (None, None, corners, ids) if return_rotation else (None, corners, ids)
     x, y, z = tvec.flatten()
     distance = math.sqrt(x ** 2 + y ** 2 + z ** 2)
-    pose = [float(x), float(y), float(z), float(distance)]
+    
+    rotation_matrix, _ = cv2.Rodrigues(rvec)
+    pitch, yaw, roll = cv2.RQDecomp3x3(rotation_matrix)[0]
+    
+    pose = [float(x), float(y), float(z), float(pitch), float(yaw), float(distance)]
+    
     if return_rotation:
-        rotation_matrix, _ = cv2.Rodrigues(rvec)
         return pose, rotation_matrix, corners, ids
     return pose, corners, ids
 
