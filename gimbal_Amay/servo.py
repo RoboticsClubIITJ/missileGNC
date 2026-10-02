@@ -466,12 +466,14 @@ class FixedRateSender:
     resent so the receiver keeps getting a packet on schedule.
     """
 
-    def __init__(self, simulink, period_s=0.05, maxlen=200):
+    def __init__(self, simulink, period_s=0.05, maxlen=200, ema_alpha=0.2):
         self.simulink = simulink
         self.period_s = period_s
         self.queue = deque(maxlen=maxlen)
         self.lock = threading.Lock()
         self._last_sent_pose = None
+        self._ema_pose = None
+        self.ema_alpha = ema_alpha
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -491,8 +493,18 @@ class FixedRateSender:
         while not self._stop_event.is_set():
             with self.lock:
                 pose = self.queue.popleft() if self.queue else None
+            
             if pose is not None:
-                self._last_sent_pose = pose
+                if self._ema_pose is None:
+                    self._ema_pose = list(pose)
+                else:
+                    self._ema_pose = [
+                        self.ema_alpha * p + (1.0 - self.ema_alpha) * e 
+                        if p is not None else e 
+                        for p, e in zip(pose, self._ema_pose)
+                    ]
+                self._last_sent_pose = self._ema_pose
+                
             if self._last_sent_pose is not None:
                 self.simulink.send(self._last_sent_pose)
             next_tick += self.period_s
