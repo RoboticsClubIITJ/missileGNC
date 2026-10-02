@@ -34,7 +34,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 load_dotenv()
 
-SIMULINK_HOST = os.getenv("SIMULINK_HOST", "10.117.206.186")
+SIMULINK_HOST = os.getenv("SIMULINK_HOST", "10.117.206.186").strip().strip('"').strip("'")
 SIMULINK_PORT = int(os.getenv("SIMULINK_PORT", "25000"))
 
 # ---------------------------------------------------------------

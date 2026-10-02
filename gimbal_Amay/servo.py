@@ -507,6 +507,9 @@ class FixedRateSender:
                 
             if self._last_sent_pose is not None:
                 self.simulink.send(self._last_sent_pose)
+                # Print every 20th packet to avoid spamming the console
+                if self.simulink.sequence % 20 == 0:
+                    print(f"[UDP] Sent data to {self.simulink.address}: {self._last_sent_pose}")
             next_tick += self.period_s
             sleep_for = next_tick - time.perf_counter()
             if sleep_for > 0:
