@@ -559,7 +559,7 @@ def main():
 
     try:
         while True:
-            frame_start = time.perf_counter()
+            frame_start = time.perf_counter() #
             frame = picam2.capture_array()
 
             if not origin_locked:
