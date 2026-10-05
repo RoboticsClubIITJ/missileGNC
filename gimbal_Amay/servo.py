@@ -537,7 +537,7 @@ def main():
     detector, dictionary, parameters, legacy_api = create_aruco_detector()
     gimbal = GimbalController()
     simulink = SimulinkPoseStreamer()
-    sender = FixedRateSender(simulink, period_s=0.05, maxlen=200)
+    sender = FixedRateSender(simulink, period_s=0.05, maxlen=200, ema_alpha=0.08)
     sender.start()
     origin_pose = None
     coordinates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coordinates.csv")
