@@ -27,7 +27,7 @@
 clear; clc;
 
 %% ---------------------------- USER SETTINGS ----------------------------
-MODEL_NAME     = 'anjaneya_V10';   % model to simulate if 'out' isn't present
+MODEL_NAME     = 'anjaneya_V11';   % model to simulate if 'out' isn't present
 PLAYBACK_SPEED = 1.0;              % 1.0 = real time, 2.0 = 2x faster, 0.5 = slower
 FRAME_DT       = 0.02;             % animation frame period [s]
 AXIS_PAD_FRAC  = 0.15;             % fractional padding around the trajectory bbox

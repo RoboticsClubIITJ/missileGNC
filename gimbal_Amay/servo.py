@@ -455,25 +455,80 @@ class SimulinkPoseStreamer:
         self.socket.close()
 
 
+# class FixedRateSender:
+#     """Drain a bounded queue of poses at a fixed period, independent of
+#     however irregularly the detection loop produces them.
+
+#     The queue is sized generously (default 200) for a short (~10s) run so
+#     it should never fill given this rig's observed detection rate; poses
+#     are pushed by the detection loop and popped here on a strict clock.
+#     If the queue runs dry (a detection stall), the last popped value is
+#     resent so the receiver keeps getting a packet on schedule.
+#     """
+
+#     def __init__(self, simulink, period_s=0.05, maxlen=200, ema_alpha=0.2):
+#         self.simulink = simulink
+#         self.period_s = period_s
+#         self.queue = deque(maxlen=maxlen)
+#         self.lock = threading.Lock()
+#         self._last_sent_pose = None
+#         self._ema_pose = None
+#         self.ema_alpha = ema_alpha
+#         self._stop_event = threading.Event()
+#         self._thread = threading.Thread(target=self._run, daemon=True)
+
+#     def start(self):
+#         self._thread.start()
+
+#     def push(self, pose):
+#         with self.lock:
+#             self.queue.append(pose)
+
+#     def stop(self):
+#         self._stop_event.set()
+#         self._thread.join(timeout=1.0)
+
+#     def _run(self):
+#         next_tick = time.perf_counter()
+#         while not self._stop_event.is_set():
+#             with self.lock:
+#                 pose = self.queue.popleft() if self.queue else None
+            
+#             if pose is not None:
+#                 if self._ema_pose is None:
+#                     self._ema_pose = list(pose)
+#                 else:
+#                     self._ema_pose = [
+#                         self.ema_alpha * p + (1.0 - self.ema_alpha) * e 
+#                         if p is not None else e 
+#                         for p, e in zip(pose, self._ema_pose)
+#                     ]
+#                 self._last_sent_pose = self._ema_pose
+                
+#             if self._last_sent_pose is not None:
+#                 self.simulink.send(self._last_sent_pose)
+#                 # Print every 20th packet to avoid spamming the console
+#                 if self.simulink.sequence % 20 == 0:
+#                     print(f"[UDP] Sent data to {self.simulink.address}: {self._last_sent_pose}")
+#             next_tick += self.period_s
+#             sleep_for = next_tick - time.perf_counter()
+#             if sleep_for > 0:
+#                 time.sleep(sleep_for)
+#             else:
+#                 # Fell behind schedule; resync instead of accumulating drift.
+#                 next_tick = time.perf_counter()
+
 class FixedRateSender:
-    """Drain a bounded queue of poses at a fixed period, independent of
-    however irregularly the detection loop produces them.
+    """Send poses at a fixed period, played back delay_s behind real time and
+    linearly interpolated between timestamped detections, so the output
+    stream is evenly spaced and continuous regardless of detection jitter."""
 
-    The queue is sized generously (default 200) for a short (~10s) run so
-    it should never fill given this rig's observed detection rate; poses
-    are pushed by the detection loop and popped here on a strict clock.
-    If the queue runs dry (a detection stall), the last popped value is
-    resent so the receiver keeps getting a packet on schedule.
-    """
-
-    def __init__(self, simulink, period_s=0.05, maxlen=200, ema_alpha=0.2):
+    def __init__(self, simulink, period_s=0.02, delay_s=5.0):
         self.simulink = simulink
         self.period_s = period_s
-        self.queue = deque(maxlen=maxlen)
+        self.delay_s = delay_s
+        self.samples = deque()          # (timestamp, pose list)
         self.lock = threading.Lock()
-        self._last_sent_pose = None
-        self._ema_pose = None
-        self.ema_alpha = ema_alpha
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -482,40 +537,42 @@ class FixedRateSender:
 
     def push(self, pose):
         with self.lock:
-            self.queue.append(pose)
+            self.samples.append((time.perf_counter(), list(pose)))
 
     def stop(self):
         self._stop_event.set()
         self._thread.join(timeout=1.0)
 
+    def _pose_at(self, t):
+        with self.lock:
+            # Drop samples that are fully in the past, keeping one before t.
+            while len(self.samples) > 2 and self.samples[1][0] <= t:
+                self.samples.popleft()
+            if not self.samples:
+                return None
+            if len(self.samples) == 1:
+                return self.samples[0][1]
+            (t0, p0), (t1, p1) = self.samples[0], self.samples[1]
+        if t <= t0:
+            return p0
+        if t >= t1:
+            return p1            # no newer data yet: hold last value
+        a = (t - t0) / (t1 - t0)
+        return [x0 + a * (x1 - x0) for x0, x1 in zip(p0, p1)]
+
     def _run(self):
         next_tick = time.perf_counter()
         while not self._stop_event.is_set():
-            with self.lock:
-                pose = self.queue.popleft() if self.queue else None
-            
+            pose = self._pose_at(time.perf_counter() - self.delay_s)
             if pose is not None:
-                if self._ema_pose is None:
-                    self._ema_pose = list(pose)
-                else:
-                    self._ema_pose = [
-                        self.ema_alpha * p + (1.0 - self.ema_alpha) * e 
-                        if p is not None else e 
-                        for p, e in zip(pose, self._ema_pose)
-                    ]
-                self._last_sent_pose = self._ema_pose
-                
-            if self._last_sent_pose is not None:
-                self.simulink.send(self._last_sent_pose)
-                # Print every 20th packet to avoid spamming the console
+                self.simulink.send(pose)
                 if self.simulink.sequence % 20 == 0:
-                    print(f"[UDP] Sent data to {self.simulink.address}: {self._last_sent_pose}")
+                    print(f"[UDP] Sent data to {self.simulink.address}: {pose}")
             next_tick += self.period_s
             sleep_for = next_tick - time.perf_counter()
             if sleep_for > 0:
                 time.sleep(sleep_for)
             else:
-                # Fell behind schedule; resync instead of accumulating drift.
                 next_tick = time.perf_counter()
 
 
@@ -537,7 +594,8 @@ def main():
     detector, dictionary, parameters, legacy_api = create_aruco_detector()
     gimbal = GimbalController()
     simulink = SimulinkPoseStreamer()
-    sender = FixedRateSender(simulink, period_s=0.05, maxlen=200)
+    # sender = FixedRateSender(simulink, period_s=0.05, maxlen=200)
+    sender = FixedRateSender(simulink, period_s=0.02, delay_s=5.0)
     sender.start()
     origin_pose = None
     coordinates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coordinates.csv")
