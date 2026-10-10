@@ -563,7 +563,13 @@ class FixedRateSender:
     def _run(self):
         next_tick = time.perf_counter()
         while not self._stop_event.is_set():
-            pose = self._pose_at(time.perf_counter() - self.delay_s)
+            # --- changed: only send once the buffer has filled delay_s seconds ---
+            t = time.perf_counter() - self.delay_s
+            with self.lock:
+                ready = bool(self.samples) and self.samples[0][0] <= t
+            pose = self._pose_at(t) if ready else None
+            # ---------------------------------------------------------------------
+
             if pose is not None:
                 self.simulink.send(pose)
                 if self.simulink.sequence % 20 == 0:
