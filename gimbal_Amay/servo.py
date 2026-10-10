@@ -340,7 +340,7 @@ def pose_has_valid_depth(marker_array, previous_z, max_depth_step=0.15):
     return previous_z is None or abs(marker_array[2] - previous_z) <= max_depth_step
 
 
-def pose_has_valid_step(marker_array, previous_pose, max_step_m=0.15):
+def pose_has_valid_step(marker_array, previous_pose, max_step_m=0.5):
     """Reject isolated solvePnP x/y/z spikes, not just depth spikes.
 
     A single bad corner-detection can move x or y by several cm in one
@@ -523,7 +523,7 @@ class FixedRateSender:
     linearly interpolated between timestamped detections, so the output
     stream is evenly spaced and continuous regardless of detection jitter."""
 
-    def __init__(self, simulink, period_s=0.02, delay_s=5.0):
+    def __init__(self, simulink, period_s=0.02, delay_s=5.0, smooth_sigma_s=0.3):
         self.simulink = simulink
         self.period_s = period_s
         self.delay_s = delay_s
@@ -531,6 +531,16 @@ class FixedRateSender:
         self.lock = threading.Lock()
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
+
+        # Gaussian smoothing kernel, applied around the playback time
+        self.sigma = smooth_sigma_s
+        if smooth_sigma_s > 0:
+            self._offsets = np.linspace(-2 * smooth_sigma_s, 2 * smooth_sigma_s, 21)
+            w = np.exp(-0.5 * (self._offsets / smooth_sigma_s) ** 2)
+        else:
+            self._offsets = np.zeros(1)
+            w = np.ones(1)
+        self._weights = w / w.sum()
 
     def start(self):
         self._thread.start()
@@ -543,23 +553,25 @@ class FixedRateSender:
         self._stop_event.set()
         self._thread.join(timeout=1.0)
 
+
     def _pose_at(self, t):
         with self.lock:
-            # Drop samples that are fully in the past, keeping one before t.
-            while len(self.samples) > 2 and self.samples[1][0] <= t:
+            # keep samples back to t - 2*sigma (plus one before) for the kernel
+            lo = t - 2 * self.sigma
+            while len(self.samples) > 2 and self.samples[1][0] <= lo:
                 self.samples.popleft()
-            if not self.samples:
-                return None
-            if len(self.samples) == 1:
-                return self.samples[0][1]
-            (t0, p0), (t1, p1) = self.samples[0], self.samples[1]
-        if t <= t0:
-            return p0
-        if t >= t1:
-            return p1            # no newer data yet: hold last value
-        a = (t - t0) / (t1 - t0)
-        return [x0 + a * (x1 - x0) for x0, x1 in zip(p0, p1)]
-
+            snap = list(self.samples)
+        if not snap:
+            return None
+        ts = np.array([s[0] for s in snap])
+        P = np.array([s[1] for s in snap])
+        if len(snap) == 1:
+            return P[0].tolist()
+        q = t + self._offsets
+        resampled = np.stack(
+            [np.interp(q, ts, P[:, j]) for j in range(P.shape[1])], axis=1
+        )
+        return (self._weights[:, None] * resampled).sum(axis=0).tolist()
     def _run(self):
         next_tick = time.perf_counter()
         while not self._stop_event.is_set():
@@ -601,7 +613,7 @@ def main():
     gimbal = GimbalController()
     simulink = SimulinkPoseStreamer()
     # sender = FixedRateSender(simulink, period_s=0.05, maxlen=200)
-    sender = FixedRateSender(simulink, period_s=0.02, delay_s=5.0)
+    sender = FixedRateSender(simulink, period_s=0.02, delay_s=5.0, smooth_sigma_s=0.3)
     sender.start()
     origin_pose = None
     coordinates_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coordinates.csv")
