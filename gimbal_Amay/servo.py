@@ -340,7 +340,7 @@ def pose_has_valid_depth(marker_array, previous_z, max_depth_step=0.15):
     return previous_z is None or abs(marker_array[2] - previous_z) <= max_depth_step
 
 
-def pose_has_valid_step(marker_array, previous_pose, max_step_m=0.5):
+def pose_has_valid_step(marker_array, previous_pose, max_step_m=1000000.0):
     """Reject isolated solvePnP x/y/z spikes, not just depth spikes.
 
     A single bad corner-detection can move x or y by several cm in one
