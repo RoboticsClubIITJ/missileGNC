@@ -1,53 +1,39 @@
-# ── Build outputs ──────────────────────────────────────────────────────────────
-firmware/build/
-*.elf
-*.bin
-*.hex
-*.map
-*.lst
+# ── MATLAB / Simulink generated files ─────────────────────────────────────────
+# Build cache and compiled models are regenerated every time a model runs.
+slprj/
+*.slxc
+*.slx.autosave
+*.slx.original
+*.asv
+*.mexw64
+*.mexa64
+*.mexmaci64
+# Created by final-product/simulink/build_udp_monitor_model.m
+gimbal_Amay_udp_monitor.slx
+udp_monitor.slx
+# Leftover inode from an interrupted file move on Linux
+.fuse_hidden*
 
-# ── CMake ──────────────────────────────────────────────────────────────────────
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-
-# ── Python ─────────────────────────────────────────────────────────────────────
-sim/.venv/
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
-.pytest_cache/
-*.egg-info/
-dist/
-*.egg
+.venv/
+venv/
+.ipynb_checkpoints/
 
-# ── Key material — NEVER commit any of these ───────────────────────────────────
-*.key
-*.pem
-*.der
-*.bin.key
-k_master*
-k_node*
-K_master*
-K_node*
-test_keys/
-provisioning/
+# ── Local configuration (copy .env.example to .env) ───────────────────────────
+.env
 
-# ── Editor / OS junk ───────────────────────────────────────────────────────────
+# ── Runtime output written by final-product/raspberry-pi/servo.py ─────────────
+coordinates.csv
+z_distance.json
+
+# ── Editor / OS ───────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
-*.swo
 *~
 .DS_Store
 Thumbs.db
-
-# ── GDB / debug artifacts ──────────────────────────────────────────────────────
-*.gdb
-gdb.txt
-*.core
-
-# ── ns-3 (for later) ───────────────────────────────────────────────────────────
-ns3/build/
-scratch/*.cc.bak
+desktop.ini
