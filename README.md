@@ -13,9 +13,9 @@ proportional navigation.
 ```text
 Target → Camera → ArUco detection → Pose estimation → Gimbal control
                                                           ↓
-                    MATLAB plotting ← Guidance ← Simulink ← UDP
+                 MATLAB plotting ← Guidance ← Simulink ← UDP
                                          ↓
-                              Autopilot → Plant → Feedback
+                                    Autopilot → Plant → Feedback
 ```
 
 ## Repository layout
