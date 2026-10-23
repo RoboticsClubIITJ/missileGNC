@@ -1,0 +1,14 @@
+# Python packages for the Raspberry Pi runtime.
+#
+# On Raspberry Pi OS, picamera2 and pigpio are best installed with apt, which
+# matches them to the system camera stack:
+#   sudo apt install python3-picamera2 python3-pigpio pigpio
+#   sudo systemctl enable --now pigpiod
+# Then install the rest with:
+#   pip install -r requirements.txt
+#
+# OpenCV must include the aruco module, which is in the contrib package.
+# Do not install opencv-python alongside it; the two conflict.
+opencv-contrib-python>=4.7
+numpy
+python-dotenv
