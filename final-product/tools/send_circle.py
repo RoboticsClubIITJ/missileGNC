@@ -1,11 +1,21 @@
+"""Send a fake target moving in a circle to Simulink, without the camera.
+
+Usage:
+    python send_circle.py                 # uses SIMULINK_HOST / SIMULINK_PORT env vars
+    python send_circle.py 192.168.1.50    # or give the MATLAB computer's IP
+
+Falls back to 127.0.0.1 (same computer as MATLAB) if neither is given.
+"""
+import os
 import socket
 import struct
+import sys
 import time
 import math
 
-# Target details provided by user
-TARGET_IP = "10.117.206.186"
-TARGET_PORT = 25000
+# IP of the computer running Simulink, and the receiver port
+TARGET_IP = sys.argv[1] if len(sys.argv) > 1 else os.getenv("SIMULINK_HOST", "127.0.0.1")
+TARGET_PORT = int(os.getenv("SIMULINK_PORT", "25000"))
 
 # UDP setup
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
