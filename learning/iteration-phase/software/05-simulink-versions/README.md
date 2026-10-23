@@ -19,10 +19,6 @@ All versions of the main guidance model, `anjaneya_V*.slx`, before the one in
 
 There is no V1 or V8 in any branch.
 
-V12 (saved 2026-10-10, two hours after V11) is in `final-product/simulink/`.
-It has the same 161 blocks as V11. The differences are in one subsystem, the
-root diagram and the solver configuration.
-
 ## `early-saves/`
 
 Earlier saves of three models that were sitting in a duplicate `simulink/`
