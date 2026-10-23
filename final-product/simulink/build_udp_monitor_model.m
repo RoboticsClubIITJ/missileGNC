@@ -1,7 +1,8 @@
 % Build a local UDP monitor for the pose stream produced by servo.py.
-% Add this folder to the MATLAB path, then run this script.
+% Add final-product/simulink to the MATLAB path, then run this script.
+% Creates udp_monitor.slx in the current folder (ignored by git).
 
-modelName = 'gimbal_Amay_udp_monitor';
+modelName = 'udp_monitor';
 if bdIsLoaded(modelName)
     close_system(modelName, 0);
 end
